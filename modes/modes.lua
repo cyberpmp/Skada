@@ -35,10 +35,10 @@ addMode({ key = "damage", title = "Damage", field = "damage", detail = "damageSp
 addMode({ key = "dps", title = "DPS", field = "damage", detail = "damageSpells", rate = true })
 addMode({ key = "damagedTargets", title = "Damaged Targets", field = "damage", detail = "damageTargets" })
 addMode({ key = "damageTaken", title = "Damage Taken", field = "damageTaken", detail = "takenSpells" })
-addMode({ key = "healing", title = "Healing", field = "effectiveHealing", detail = "healingSpells", detailValueField = "effectiveHealing", healingSummary = true })
-addMode({ key = "hps", title = "HPS", field = "effectiveHealing", detail = "healingSpells", detailValueField = "effectiveHealing", healingSummary = true, rate = true })
+addMode({ key = "healing", title = "Healing", field = "effectiveHealing", detail = "healingSpells", detailValueField = "effectiveHealing" })
+addMode({ key = "hps", title = "HPS", field = "effectiveHealing", detail = "healingSpells", detailValueField = "effectiveHealing", rate = true })
 addMode({ key = "overhealing", title = "Overhealing", field = "overhealing", detail = "healingSpells", detailValueField = "overhealing" })
-addMode({ key = "healedTargets", title = "Healing Targets", field = "effectiveHealing", detail = "healTargets", detailValueField = "effectiveHealing", healingSummary = true })
+addMode({ key = "healedTargets", title = "Healing Targets", field = "effectiveHealing", detail = "healTargets", detailValueField = "effectiveHealing" })
 addMode({ key = "power", title = "Power Gained", field = "power", detail = "powerSpells" })
 addMode({ key = "dispels", title = "Dispels", field = "dispels", detail = "dispelSpells", count = true })
 addMode({ key = "interrupts", title = "Interrupts", field = "interrupts", detail = "interruptSpells", count = true })
@@ -70,14 +70,6 @@ function Modes:GetSetTitle(mode, set)
   if mode.count then
     return formatCount(raw, mode.duration and (set.ccDuration or 0) or nil)
   end
-  if mode.healingSummary then
-    local effective = raw
-    if mode.rate then
-      local duration = max(1, Skada.Data:GetSetDuration(set))
-      effective = effective / duration
-    end
-    return Skada:FormatNumber(effective)
-  end
   if mode.rate then
     return Skada:FormatNumber(raw / max(1, Skada.Data:GetSetDuration(set)))
   end
@@ -94,14 +86,6 @@ function Modes:GetActorText(mode, actor, set)
   end
   if mode.count then
     return formatCount(raw, mode.duration and (actor.ccDuration or 0) or nil)
-  end
-  if mode.healingSummary then
-    local effective = raw
-    if mode.rate then
-      local duration = max(1, actor.activeTime or 0)
-      effective = effective / duration
-    end
-    return Skada:FormatNumber(effective)
   end
   if mode.rate then return Skada:FormatNumber(value) end
 
@@ -129,14 +113,6 @@ function Modes:GetDetailText(mode, spell, actor, set)
   if mode.count then
     return formatCount(value, mode.duration and spell.duration or nil)
   end
-  if mode.healingSummary then
-    local effective = spell.effectiveHealing or value
-    if mode.rate then
-      local duration = max(1, actor and actor.activeTime or 0)
-      effective = effective / duration
-    end
-    return Skada:FormatNumber(effective)
-  end
   local total = actor[mode.field] or 0
   return Skada:FormatNumber(value) .. " (" .. formatPercentPart(value, total) .. ")"
 end
@@ -159,6 +135,19 @@ function Modes:Cycle(direction, window)
   Skada:MarkDirty()
 end
 
+-- A window keeps its own name once the user has renamed it; auto-named
+-- windows (name still matching a mode title, or created from a mode) follow
+-- the mode so the settings tree and window list stay truthful.
+function Modes:IsAutoNamed(config)
+  if config.nameIsCustom then return false end
+  if config.name == nil then return true end
+  local i
+  for i = 1, table_getn(self.list) do
+    if config.name == self.list[i].title then return true end
+  end
+  return false
+end
+
 function Modes:Set(value, window)
   if not value then return false end
   window = window or (Skada.UI and Skada.UI.GetActive and Skada.UI:GetActive())
@@ -170,6 +159,10 @@ function Modes:Set(value, window)
     if string.lower(mode.key) == lowered or string.lower(mode.title) == lowered then
       config.mode = mode.key
       if mode.live then config.segment = "current" end
+      if window and window.db == config and self:IsAutoNamed(config) and config.name ~= mode.title then
+        config.name = mode.title
+        if window.title then window.title:SetText(config.name) end
+      end
       DataNavigation:OnModeChanged(window)
       Skada:MarkDirty()
       return true

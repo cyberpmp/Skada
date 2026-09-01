@@ -101,6 +101,8 @@ function Schema.RenameSet()
     local window = Skada.Options and Skada.Options:GetCurrentWindow()
     if not window or not value or value == "" then return end
     window.db.name = value
+    -- a hand-set name is the user's own; the mode switcher must not take it back
+    window.db.nameIsCustom = true
     if window.title then window.title:SetText(value) end
     Skada:MarkDirty()
   end
@@ -270,10 +272,38 @@ Schema.pages = {
   window = {
     title = "Window",
     dynamicTitle = true,
-    tabs = {
+    rows = {
       {
-        key = "design", label = "Design",
-        rows = {
+        key = "combatHeader", widget = "header", label = "Combat",
+      },
+      {
+        key = "combatMode", widget = "dropdown",
+            label = "Combat mode",
+            description = "Mode this window switches to when combat starts. None keeps the current mode.",
+            choices = function()
+              local choices = { { value = "", label = "None" } }
+              local modes = Schema:ModeChoices()
+              local i
+              for i = 1, table_getn(modes) do choices[table_getn(choices) + 1] = modes[i] end
+              return choices
+            end,
+            get = Schema.WindowGet("combatMode"),
+            set = function(value)
+              Schema.WindowSet("combatMode")(value)
+              local window = Skada.Options:GetCurrentWindow()
+              if window then window:ApplyCombatState(Skada.Data.clientInCombat) end
+            end,
+          },
+          {
+            key = "returnAfterCombat", widget = "checkbox",
+            label = "Return after combat",
+            description = "With a combat mode set, restore the previous mode when combat ends.",
+            get = Schema.WindowGet("returnAfterCombat"),
+            set = Schema.WindowSet("returnAfterCombat"),
+          },
+      {
+        key = "designHeader", widget = "header", label = "Design",
+      },
           {
             key = "visible", widget = "checkbox",
             label = "Visible",
@@ -287,6 +317,13 @@ Schema.pages = {
             description = "Lock the window: no dragging or resizing.",
             get = Schema.WindowGet("locked"),
             set = Schema.WindowSet("locked", true),
+          },
+          {
+            key = "hideTitle", widget = "checkbox",
+            label = "Hide title bar",
+            description = "Collapse the window to its bars. The top bar slot then navigates and drags like the title bar, even when no bar is displayed.",
+            get = Schema.WindowGet("hideTitle"),
+            set = Schema.WindowSet("hideTitle", true),
           },
           {
             key = "name", widget = "editbox",
@@ -355,8 +392,8 @@ Schema.pages = {
           {
             key = "windowOpacity", widget = "slider",
             label = "Window opacity",
-            description = "Opacity of the dark meter-window background. Shared by all windows.",
-            min = 0.2, max = 1, step = 0.05,
+            description = "Opacity of the dark meter-window background. Shared by all windows. Drag to 0% for a fully transparent window.",
+            min = 0, max = 1, step = 0.05,
             format = function(value) return tostring(floor(value * 100 + 0.5)) .. "%" end,
             get = function() return Skada.db.profile.windowOpacity or 0.9 end,
             set = Schema.AppearanceSet("windowOpacity", true),
@@ -384,12 +421,9 @@ Schema.pages = {
             get = function() return Skada.db.profile.barSpeed or 8 end,
             set = Schema.AppearanceSet("barSpeed", false),
           },
-        },
-      },
-
       {
-        key = "text", label = "Text & Color",
-        rows = {
+        key = "textHeader", widget = "header", label = "Text & Color",
+      },
           {
             key = "barTexture", widget = "dropdown",
             label = "Bar texture",
@@ -484,12 +518,9 @@ Schema.pages = {
             get = function() return Skada.db.profile.barBorderColor end,
             set = function(r, g, b) Skada.db.profile.barBorderColor = { r, g, b } end,
           },
-        },
-      },
-
       {
-        key = "mode", label = "Mode & Data",
-        rows = {
+        key = "modeHeader", widget = "header", label = "Mode & Data",
+      },
           {
             key = "mode", widget = "dropdown",
             label = "Mode",
@@ -503,7 +534,11 @@ Schema.pages = {
               local window = Skada.Options and Skada.Options:GetCurrentWindow()
               if not window then return end
               Skada.Modes:Set(value, window)
-              if Skada.Options.frame then Skada.Options:RefreshPage() end
+              if Skada.Options.frame then
+                Skada.Options:RefreshPage()
+                -- auto-named windows rename with the mode; keep the tree label current
+                if Skada.OptionsShell then Skada.OptionsShell.RebuildTree(Skada.Options) end
+              end
             end,
           },
           {
@@ -570,6 +605,13 @@ Schema.pages = {
             set = Schema.WindowSet("snapGap", false),
           },
           {
+            key = "snapSize", widget = "checkbox",
+            label = "Match size when snapped",
+            description = "Adopt the size of the window docked against: stacked windows share a width but keep their own row count, side-by-side windows share a row count but keep their own width.",
+            get = Schema.WindowGet("snapSize"),
+            set = Schema.WindowSet("snapSize", true),
+          },
+          {
             key = "deleteWindow", widget = "action",
             label = "Delete this window",
             description = "Remove this meter window after confirmation.",
@@ -579,8 +621,6 @@ Schema.pages = {
               if window then Skada.UI:RequestDelete(window) end
             end,
           },
-        },
-      },
     },
   },
 }

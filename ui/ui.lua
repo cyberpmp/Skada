@@ -195,6 +195,18 @@ function UI:InitializeWindow(config)
       owner:Scroll(delta)
     end
   end)
+  frame:RegisterForDrag("LeftButton")
+  frame:SetScript("OnDragStart", function()
+    owner.manager:SetActive(owner)
+    owner.actionMenu:Hide()
+    owner.headerWasDragged = true
+    if not config.locked then frame:StartMoving() end
+  end)
+  frame:SetScript("OnDragStop", function()
+    frame:StopMovingOrSizing()
+    owner.manager:SnapWindow(owner)
+    persistGeometry(owner, true)
+  end)
 
   local header = CreateFrame("Button", nil, frame)
   self.header = header
@@ -305,6 +317,48 @@ function UI:InitializeWindow(config)
     GameTooltip:Hide()
   end)
 
+  -- When the title bar is hidden, this button occupies the top-bar slot so the
+  -- header's navigation and dragging keep working with no header visible.
+  local clickCatcher = CreateFrame("Button", nil, frame)
+  self.clickCatcher = clickCatcher
+  clickCatcher:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  clickCatcher:RegisterForDrag("LeftButton")
+  clickCatcher:SetScript("OnDragStart", function()
+    owner.manager:SetActive(owner)
+    owner.actionMenu:Hide()
+    owner.headerWasDragged = true
+    if not config.locked then frame:StartMoving() end
+  end)
+  clickCatcher:SetScript("OnDragStop", function()
+    frame:StopMovingOrSizing()
+    owner.manager:SnapWindow(owner)
+    persistGeometry(owner, true)
+  end)
+  clickCatcher:SetScript("OnClick", function(self, button)
+    button = getClickButton(button)
+    owner.manager:SetActive(owner)
+    if owner.headerWasDragged then
+      owner.headerWasDragged = false
+      return
+    end
+    if button == "RightButton" then
+      -- With the title bar hidden this slot is the window's menu bar.
+      owner.actionMenu:Toggle()
+    else
+      owner.actionMenu:Hide()
+      owner:Forward()
+    end
+  end)
+  clickCatcher:SetScript("OnMouseDown", function() owner.headerWasDragged = false end)
+  clickCatcher:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:AddLine(owner.currentTitle or config.name or "Skada", 1, 0.5, 0)
+    GameTooltip:AddLine("Title bar hidden: right-click for the menu, left-click forward, drag to move.", 0.8, 0.8, 0.8)
+    GameTooltip:Show()
+  end)
+  clickCatcher:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  clickCatcher:Hide()
+
   local resizeButton = CreateFrame("Button", nil, frame)
   self.resizeButton = resizeButton
   resizeButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -2, 2)
@@ -360,12 +414,26 @@ end
 function UI:SetActive(window)
   if not window then return end
   self.activeWindow = window
+  self.visualActive = window
   Skada.db.profile.selectedWindowID = window.db.id
   local i, candidate
   for i = 1, table_getn(self.windows) do
     candidate = self.windows[i]
     if candidate ~= window and candidate.actionMenu then candidate.actionMenu:Hide() end
     Style:ApplyMeterWindow(candidate.frame, candidate == window)
+    Style:ApplyHeader(candidate)
+  end
+end
+
+-- Drops the "selected" border highlight without touching the active-window
+-- logic; used when the settings window closes so no meter is left looking
+-- picked.
+function UI:ClearSelectionVisual()
+  self.visualActive = nil
+  local i, candidate
+  for i = 1, table_getn(self.windows) do
+    candidate = self.windows[i]
+    Style:ApplyMeterWindow(candidate.frame, false)
     Style:ApplyHeader(candidate)
   end
 end
@@ -461,6 +529,14 @@ function UI:RefreshAll()
 end
 
 function UI:ApplyCombatState(inCombat)
+  local combatMode = self.db.combatMode
+  if inCombat and combatMode and combatMode ~= "" and combatMode ~= self.db.mode then
+    if self.db.returnAfterCombat then self.restoreMode = self.db.mode end
+    Skada.Modes:Set(combatMode, self)
+  elseif not inCombat and self.restoreMode then
+    Skada.Modes:Set(self.restoreMode, self)
+    self.restoreMode = nil
+  end
   if Skada.Modes:Get(self.db.mode).live then self.db.segment = "current" end
   if not self.db.autoSwitch then return end
   if not Skada.Modes:Get(self.db.mode).live then

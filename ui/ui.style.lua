@@ -156,7 +156,7 @@ end
 function Style:ApplyHeader(window)
   if not window or not window.headerTexture then return end
   local profile = Skada.db.profile
-  local active = window.manager and window.manager:GetActive() == window
+  local active = window.manager and window.manager.visualActive == window
   local r, g, b = 0.055, 0.060, 0.075
   if active then r, g, b = 0.072, 0.078, 0.098 end
   if profile.classColorMenus then

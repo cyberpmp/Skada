@@ -13,15 +13,20 @@ def run(ctx: Context):
     ctx.run(r'''
       Skada.Options:Open()
       assert(Skada.Options.frame and Skada.Options.frame:IsShown())
-      assert(Skada.Options.title.textValue == "SKADA")
-      assert(Skada.Options.subtitle.textValue == "Meter settings")
-      assert(Skada.Options.frame.backdropR == 0.026 and Skada.Options.frame.backdropA == 0.99)
-      assert(Skada.Options.viewport.backdropA == 0 and Skada.Options.viewport.borderA == 0)
-      assert(Skada.Options.treePanel.backdropA == 0 and Skada.Options.treePanel.borderA == 0)
-      assert(Skada.Options.title.textR == 0.92 and Skada.UIStyle.UI_ACCENT_R == 0.38)
+      assert(Skada.Options.title.textValue == "Skada")
+      assert(Skada.Options.statusText.textValue == "Core behavior and everyday conveniences.")
+      assert(Skada.Options.frame.backdropR == 0 and Skada.Options.frame.backdropA == 1)
+      assert(Skada.Options.viewport.backdropA == 0.5 and Skada.Options.viewport.borderR == 0.4)
+      assert(Skada.Options.treePanel.backdropA == 0.5 and Skada.Options.treePanel.borderR == 0.4)
+      assert(Skada.Options.title.textR == 1 and Skada.Options.title.textG == 0.82)
       assert(Skada.Options.scrollbar.width == 10)
       assert(Skada.Options.scrollbar.track.width == 6 and Skada.Options.scrollbar.thumb.width == 6)
       assert(not rawget(Skada.Options.scrollbar, "up") and not rawget(Skada.Options.scrollbar, "down"))
+      Skada.Options:OpenPage("window")
+      local windowSpec = Skada.OptionsSchema.pages.window.rows
+      assert(windowSpec and table.getn(windowSpec) == 40, "window page must hold every row")
+      assert(windowSpec[1].key == "combatHeader" and windowSpec[1].widget == "header")
+      Skada.Options:OpenPage("general")
       local capturedScroll = -1
       local modernScroll = Skada.Options.kit.createScrollbar(Skada.Options.frame,
         Skada.Options.viewport, function(offset) capturedScroll = offset end)
@@ -47,6 +52,18 @@ def run(ctx: Context):
       assert(Skada.Options.frame.alpha == 1 and not rawget(Skada.Options.frame, "OnUpdate"))
       local primary = Skada.UI:GetPrimary()
       assert(Skada.Options.selectedWindow == primary)
+
+      -- closing the settings must drop the selection border from the meters
+      Skada.Options:SelectWindow(primary)
+      local borderWhileSelected = primary.frame.borderR
+      Skada.Options.frame.OnHide()
+      assert(Skada.UI.visualActive == nil, "settings close kept the visual selection")
+      assert(primary.frame.borderR == 0.10 and primary.frame.borderR ~= borderWhileSelected,
+        "settings close did not drop the selection border")
+      Skada.Options:SelectWindow(primary)
+      assert(primary.frame.borderR == borderWhileSelected,
+        "reselecting did not restore the selection border")
+      Skada.Options:OpenPage("general")
 
       assert(Skada.Options.currentPage == "general")
       local generalPage = Skada.Options.pageCache.general
@@ -140,6 +157,21 @@ def run(ctx: Context):
       assert(target.db.fontSize == 15, target.db.fontSize)
       sliderRow.OnMouseUp()
 
+      -- a drag keeps following the cursor after it leaves the thin track
+      local savedIsDown = IsMouseButtonDown
+      IsMouseButtonDown = function() return true end
+      sliderRow.OnMouseDown()
+      GetCursorPosition = function() return 500, 300 end
+      sliderRow.OnUpdate()
+      assert(target.db.fontSize == 22, target.db.fontSize)
+      GetCursorPosition = function() return 40, 300 end
+      sliderRow.OnUpdate()
+      assert(target.db.fontSize < 15 and target.db.fontSize >= 8,
+        "dragging off the track stopped updating the slider: " .. tostring(target.db.fontSize))
+      IsMouseButtonDown = function() return false end
+      sliderRow.OnUpdate()
+      IsMouseButtonDown = savedIsDown
+
       local widthRow
       for i = 1, table.getn(Skada.Options.controls) do
         local row = Skada.Options.controls[i]
@@ -167,8 +199,7 @@ def run(ctx: Context):
 
       Skada.Options:OpenPage("window")
       local winPage = Skada.Options.pageCache.window
-      assert(winPage and winPage.strip, "window page tab strip missing")
-      assert(winPage.activeTab == "design", winPage.activeTab)
+      assert(winPage and not winPage.strip, "window page must be a single scrollable page")
       local rowForKey = {}
       local i
       for i = 1, table.getn(winPage.rows) do
@@ -176,19 +207,42 @@ def run(ctx: Context):
         if row.key then rowForKey[row.key] = row end
       end
       assert(rowForKey.width and rowForKey.name and rowForKey.mode and rowForKey.segment
+        and rowForKey.combatMode and rowForKey.returnAfterCombat
         and rowForKey.deleteWindow, "window page rows missing")
-      assert(rowForKey.width:IsShown(), "design row should be visible on its tab")
-      winPage.strip:SetSelected("mode")
-      assert(winPage.activeTab == "mode", winPage.activeTab)
-      assert(Skada.Options.uiTabs.window == "mode", "active tab not remembered")
-      assert(not rowForKey.width:IsShown(), "design row must hide on the mode tab")
-      Skada.Options.viewport.OnMouseWheel(nil, -1)
-      Skada.Options.viewport.OnMouseWheel(nil, -1)
-      Skada.Options.viewport.OnMouseWheel(nil, -1)
-      Skada.Options.viewport.OnMouseWheel(nil, -1)
-      assert(rowForKey.segment:IsShown(), "mode-tab row should enter the scroll band")
-      winPage.strip:SetSelected("design")
-      assert(rowForKey.width:IsShown(), "design row should return with its tab")
+      -- the page leads with combat switching, readable without any scrolling
+      assert(rowForKey.combatHeader:IsShown() and rowForKey.designHeader:IsShown(),
+        "section headers must render")
+      assert(rowForKey.combatMode:IsShown() and rowForKey.returnAfterCombat:IsShown(),
+        "combat rows must be visible without scrolling")
+      -- the remaining sections live further down the single page
+      assert(not rowForKey.mode:IsShown(), "mode rows must sit below the fold until scrolled")
+      -- no row may render up in the page header band: a shown row's top edge
+      -- must stay at or below the content area's top (headerPad down the pane)
+      local i, row
+      for i = 1, table.getn(winPage.rows) do
+        row = winPage.rows[i]
+        assert(not row:IsShown() or row.rowTop >= Skada.Options.scrollOffset,
+          "row " .. tostring(row.key) .. " scrolled over the page header")
+      end
+      local wheels
+      for wheels = 1, 20 do Skada.Options.viewport.OnMouseWheel(nil, -1) end
+      assert(rowForKey.mode:IsShown() and rowForKey.segment:IsShown(),
+        "scrolling must bring the mode section into view")
+      assert(rowForKey.deleteWindow:IsShown(), "window actions must be reachable by scrolling")
+      assert(not rowForKey.combatHeader:IsShown(),
+        "rows scrolled past the header band must hide, not draw over it")
+      for i = 1, table.getn(winPage.rows) do
+        row = winPage.rows[i]
+        assert(not row:IsShown() or row.rowTop >= Skada.Options.scrollOffset,
+          "row " .. tostring(row.key) .. " scrolled over the page header")
+      end
+      -- at the bottom of the page the thumb must sit at the end of its track
+      local bar = Skada.Options.scrollbar
+      assert(bar.offset == winPage.height - (424 - winPage.headerPad),
+        "scroll did not reach the end of the page")
+      assert(bar.track.height == 424, "track height must be set explicitly for GetHeight")
+      assert(-bar.thumb.lastPointY + bar.thumb.height == bar.track.height,
+        "thumb must reach the end of its track at max scroll")
 
       Skada.Options:SelectWindow(second)
       assert(Skada.Options.currentPage == "window")
@@ -213,12 +267,63 @@ def run(ctx: Context):
       pickDropdown(rowForKey.mode, modeBefore)
       assert(second.db.mode == modeBefore)
 
+      -- an auto-named window follows its mode's name; a hand-set name stays
+      local auto = Skada.UI:CreateNew()
+      assert(auto.db.name == Skada.Modes:Get(auto.db.mode).title and not auto.db.nameIsCustom,
+        "a new window should be auto-named from its mode")
+      Skada.Options:SelectWindow(auto)
+      pickDropdown(rowForKey.mode, "healing")
+      assert(auto.db.mode == "healing" and auto.db.name == "Healing" and not auto.db.nameIsCustom,
+        "switching mode did not rename the auto-named window")
+      local k, nodeRow
+      for k = 1, table.getn(Skada.Options.treeRows) do
+        nodeRow = Skada.Options.treeRows[k]
+        if nodeRow.node and nodeRow.node.window == auto then
+          assert(nodeRow.node.label == "Healing",
+            "settings tree did not pick up the mode-derived name")
+        end
+      end
+      rowForKey.name.setValue("My meter")
+      assert(auto.db.name == "My meter" and auto.db.nameIsCustom,
+        "manual rename did not mark the window as custom-named")
+      pickDropdown(rowForKey.mode, "threat")
+      assert(auto.db.name == "My meter", "mode switch clobbered a custom window name")
+      assert(Skada.UI:DeleteWindow(auto), "temporary window cleanup failed")
+      Skada.Options:SelectWindow(second)
+
       pickDropdown(rowForKey.segment, 1)
       assert(second.db.segment == 1, second.db.segment)
       pickDropdown(rowForKey.segment, "total")
       assert(second.db.segment == "total", second.db.segment)
       pickDropdown(rowForKey.segment, "current")
       assert(second.db.segment == "current", second.db.segment)
+
+      assert(rowForKey.hideTitle and rowForKey.combatMode and rowForKey.returnAfterCombat,
+        "hide-title and combat-switch rows missing from the window page")
+      local hideBefore = second.db.hideTitle
+      rowForKey.hideTitle.setValue(not hideBefore)
+      assert(second.db.hideTitle == not hideBefore and second.layoutDirty,
+        "hide-title toggle did not mark the window layout dirty")
+      rowForKey.hideTitle.setValue(hideBefore)
+
+      local racBefore = second.db.returnAfterCombat
+      rowForKey.returnAfterCombat.setValue(not racBefore)
+      assert(second.db.returnAfterCombat == not racBefore)
+      rowForKey.returnAfterCombat.setValue(racBefore)
+
+      assert(rowForKey.snapSize, "snap size-match row missing from the window page")
+      local sizeBefore = second.db.snapSize
+      rowForKey.snapSize.setValue(not sizeBefore)
+      assert(second.db.snapSize == not sizeBefore)
+      rowForKey.snapSize.setValue(sizeBefore)
+
+      local combatBefore = second.db.combatMode
+      pickDropdown(rowForKey.combatMode, "threat")
+      assert(second.db.combatMode == "threat", second.db.combatMode)
+      assert(Skada.db.profile.combatMode == combatBefore,
+        "secondary window combat mode leaked into the profile mirror")
+      pickDropdown(rowForKey.combatMode, "")
+      assert(second.db.combatMode == "", second.db.combatMode)
 
       rowForKey.name.setValue("Renamed meter")
       assert(second.db.name == "Renamed meter", second.db.name)
