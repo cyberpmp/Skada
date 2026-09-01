@@ -1,0 +1,45 @@
+## Interface: 11200
+## Title: |cffff8000Skada|r
+## Notes: Lightweight combat meter for Vanilla 1.12.1 and ClassicAPI.
+## Author: PMP (cyberpmp)
+## Version: 1.0.0
+## OptionalDeps: !!!ClassicAPI, BigWigs
+## SavedVariables: SkadaDB
+## LoadSavedVariablesFirst: 1
+## X-Category: Combat
+## X-License: MIT
+## X-Website: https://github.com/cyberpmp/skada
+
+core\core.common.lua
+core\core.defaults.lua
+core\core.runtime.lua
+data\data.identity.lua
+data\data.aggregator.lua
+data\data.boss.lua
+data\data.segments.lua
+data\data.navigation.lua
+data\data.lua
+data\data.reset.lua
+threat\threat.estimate.lua
+threat\threat.lua
+tracking\tracking.spells.lua
+tracking\tracking.casts.lua
+tracking\tracking.auras.lua
+tracking\tracking.damage.lua
+tracking\tracking.group.lua
+tracking\tracking.lua
+combat\combat.parser.lua
+modes\modes.lua
+ui\ui.style.lua
+ui\ui.config.lua
+ui\ui.presenter.lua
+ui\ui.rows.lua
+ui\ui.snap.lua
+ui\ui.report.lua
+ui\ui.lua
+options\options.widgets.lua
+options\options.schema.lua
+options\options.shell.lua
+options\options.minimap.lua
+options\options.lua
+commands\commands.lua
