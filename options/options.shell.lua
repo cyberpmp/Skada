@@ -41,7 +41,11 @@ local TITLE_TEXTURE = "Interface\\DialogFrame\\UI-DialogBox-Header"
 local HIGHLIGHT_TEXTURE = "Interface\\QuestFrame\\UI-QuestTitleHighlight"
 local PLUS_TEXTURE = "Interface\\Buttons\\UI-PlusButton-Up"
 local MINUS_TEXTURE = "Interface\\Buttons\\UI-MinusButton-Up"
-local GOLD_R, GOLD_G, GOLD_B = 1, 0.82, 0
+local GOLD_R, GOLD_G, GOLD_B = Style.GOLD_R, Style.GOLD_G, Style.GOLD_B
+local PANE_BG_R, PANE_BG_G, PANE_BG_B, PANE_BG_A =
+  Style.PANE_BG_R, Style.PANE_BG_G, Style.PANE_BG_B, Style.PANE_BG_A
+local PANE_BORDER_R, PANE_BORDER_G, PANE_BORDER_B =
+  Style.PANE_BORDER_R, Style.PANE_BORDER_G, Style.PANE_BORDER_B
 
 local UI_FONT = "Fonts\\FRIZQT__.TTF"
 if GameFontNormal and GameFontNormal.GetFont then
@@ -104,8 +108,8 @@ function Shell.Build(owner)
   status:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 15, 15)
   status:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -137, 15)
   status:SetBackdrop(PANE_BACKDROP)
-  status:SetBackdropColor(0.1, 0.1, 0.1, 1)
-  status:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+  status:SetBackdropColor(PANE_BG_R, PANE_BG_G, PANE_BG_B, 1)
+  status:SetBackdropBorderColor(PANE_BORDER_R, PANE_BORDER_G, PANE_BORDER_B, 1)
   local statusText = status:CreateFontString(nil, "OVERLAY")
   statusText:SetPoint("LEFT", status, "LEFT", 7, 0)
   statusText:SetPoint("RIGHT", status, "RIGHT", -7, 0)
@@ -135,21 +139,37 @@ function Shell.Build(owner)
   treePanel:SetHeight(VIEW_HEIGHT)
   treePanel:SetPoint("TOPLEFT", frame, "TOPLEFT", 17, -36)
   treePanel:SetBackdrop(PANE_BACKDROP)
-  treePanel:SetBackdropColor(0.1, 0.1, 0.1, 0.5)
-  treePanel:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+  treePanel:SetBackdropColor(PANE_BG_R, PANE_BG_G, PANE_BG_B, PANE_BG_A)
+  treePanel:SetBackdropBorderColor(PANE_BORDER_R, PANE_BORDER_G, PANE_BORDER_B, 1)
 
   local viewport = CreateFrame("Frame", nil, frame)
   viewport:SetWidth(CONTENT_WIDTH)
   viewport:SetHeight(VIEW_HEIGHT)
   viewport:SetPoint("TOPLEFT", frame, "TOPLEFT", 17 + TREE_WIDTH + 12, -36)
   viewport:SetBackdrop(PANE_BACKDROP)
-  viewport:SetBackdropColor(0.1, 0.1, 0.1, 0.5)
-  viewport:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+  viewport:SetBackdropColor(PANE_BG_R, PANE_BG_G, PANE_BG_B, PANE_BG_A)
+  viewport:SetBackdropBorderColor(PANE_BORDER_R, PANE_BORDER_G, PANE_BORDER_B, 1)
   viewport:EnableMouseWheel(true)
   viewport:SetScript("OnMouseWheel", function(_, delta)
     delta = getWheelDelta(delta)
     if delta ~= 0 then Shell.ApplyScroll(owner, (owner.scrollOffset or 0) - delta * 60) end
   end)
+
+  -- Opaque band over the page header. Rows are children of the page content,
+  -- which draws above the viewport's own artwork, so without this cover a
+  -- row scrolled into the header band would draw over the title; with it the
+  -- row slides beneath the header and is masked row-piece by row-piece.
+  local headerCover = CreateFrame("Frame", nil, viewport)
+  headerCover:SetBackdrop({
+    bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+    tile = true, tileSize = 16,
+  })
+  headerCover:SetBackdropColor(PANE_BG_R * PANE_BG_A, PANE_BG_G * PANE_BG_A, PANE_BG_B * PANE_BG_A, 1)
+  -- Rows are grandchildren of the viewport (content +1, row +2) and are
+  -- created after this cover, so at an equal level they would draw on top;
+  -- stay above both generations or the mask loses.
+  headerCover:SetFrameLevel(viewport:GetFrameLevel() + 3)
+  owner.headerCover = headerCover
 
   local scrollbar = owner.kit.createScrollbar(frame, viewport, function(offset)
     Shell.ApplyScroll(owner, offset)
@@ -300,7 +320,7 @@ function Shell.UpdateTreeSelection(owner)
       row.highlight:Show()
       row.hover:Hide()
       row.skadaSelected = true
-      row.label:SetTextColor(1, 0.9, 0.2, 1)
+      row.label:SetTextColor(Style.GOLD_BRIGHT_R, Style.GOLD_BRIGHT_G, Style.GOLD_BRIGHT_B, 1)
     else
       row.highlight:Hide()
       row.skadaSelected = false
@@ -327,14 +347,14 @@ function Shell.GetPage(owner, pageKey)
 
   page = { content = content, rows = {}, pageKey = pageKey, tabHeights = {}, dynamic = spec.dynamicTitle }
 
-  page.title = owner.viewport:CreateFontString(nil, "OVERLAY")
+  page.title = owner.headerCover:CreateFontString(nil, "OVERLAY")
   page.title:SetPoint("TOPLEFT", owner.viewport, "TOPLEFT", 8, -9)
   setUiFont(page.title, 16)
   page.title:SetTextColor(0.95, 0.96, 0.99, 1)
   page.title:SetText(spec.dynamicTitle and "Window" or (spec.title or pageKey))
   page.title:Hide()
 
-  page.description = owner.viewport:CreateFontString(nil, "OVERLAY")
+  page.description = owner.headerCover:CreateFontString(nil, "OVERLAY")
   page.description:SetPoint("TOPLEFT", owner.viewport, "TOPLEFT", 8, -29)
   page.description:SetWidth(CONTENT_WIDTH - 20)
   page.description:SetJustifyH("LEFT")
@@ -343,7 +363,7 @@ function Shell.GetPage(owner, pageKey)
   page.description:SetText(PAGE_DESCRIPTIONS[pageKey] or "Skada settings.")
   page.description:Hide()
 
-  page.rule = owner.viewport:CreateTexture(nil, "ARTWORK")
+  page.rule = owner.headerCover:CreateTexture(nil, "ARTWORK")
   page.rule:SetTexture(Style.WHITE)
   page.rule:SetVertexColor(0.22, 0.25, 0.31, 0.42)
   page.rule:SetHeight(1)
@@ -360,7 +380,7 @@ function Shell.GetPage(owner, pageKey)
       tabSpecs[t] = { key = tab.key, label = tab.label }
     end
     page.firstTab = tabSpecs[1].key
-    page.strip = owner.kit.createTabStrip(owner.viewport, tabSpecs)
+    page.strip = owner.kit.createTabStrip(owner.headerCover, tabSpecs)
     page.strip:SetPoint("TOPLEFT", owner.viewport, "TOPLEFT", 4, -57)
     page.strip.OnChange = function(key) Shell.ActivateTab(owner, page, key) end
     page.strip:Hide()
@@ -369,6 +389,11 @@ function Shell.GetPage(owner, pageKey)
     groups = { { rows = spec.rows } }
     page.headerPad = 58
   end
+
+  -- the cover spans the page's header band, inside the pane border
+  owner.headerCover:ClearAllPoints()
+  owner.headerCover:SetPoint("TOPLEFT", owner.viewport, "TOPLEFT", 3, -5)
+  owner.headerCover:SetPoint("BOTTOMRIGHT", owner.viewport, "TOPRIGHT", -3, -page.headerPad)
 
   local g, group, i, rowSpec, row, top
   for g = 1, table_getn(groups) do
@@ -494,17 +519,19 @@ function Shell.ApplyScroll(owner, offset)
 
   page.content:SetPoint("TOPLEFT", owner.viewport, "TOPLEFT", 0, owner.scrollOffset - headerPad)
 
-  -- The visible band is the pane minus the title/description header: a row is
-  -- shown only while it sits fully between the content area's top edge (at
-  -- scrollOffset in content coordinates) and the pane bottom, so scrolled rows
-  -- slide away beneath the page header instead of drawing over it.
+  -- The visible band is the pane minus the title/description header: a row
+  -- stays shown while its bottom edge is still below the content area's top
+  -- edge (at scrollOffset in content coordinates) and its bottom has not
+  -- passed the pane bottom. The part scrolled into the header band is masked
+  -- by the opaque header cover, so rows slide beneath the page header
+  -- instead of popping out one row-height early.
   local viewTop = owner.scrollOffset
   local viewBottom = viewTop + viewHeight
   local i, row
   for i = 1, table_getn(page.rows) do
     row = page.rows[i]
     local inTab = not activeTab or not row.tab or row.tab == activeTab
-    if inTab and row.rowTop >= viewTop and row.rowBottom <= viewBottom then
+    if inTab and row.rowBottom >= viewTop and row.rowBottom <= viewBottom then
       row:Show()
     else
       row:Hide()

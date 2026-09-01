@@ -148,6 +148,9 @@ python -m pip install -r requirements-dev.txt
 python tests/run_tests.py
 ```
 
+The test suite runs on Python 3.8+; the release tool in `tools/` requires
+Python 3.10+ (CI pins 3.12).
+
 See [ARCHITECTURE.md](ARCHITECTURE.md) for module contracts and extension
 guidance. Third-party asset provenance is documented in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

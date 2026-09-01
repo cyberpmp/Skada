@@ -24,7 +24,7 @@ def run(ctx: Context):
       assert(not rawget(Skada.Options.scrollbar, "up") and not rawget(Skada.Options.scrollbar, "down"))
       Skada.Options:OpenPage("window")
       local windowSpec = Skada.OptionsSchema.pages.window.rows
-      assert(windowSpec and table.getn(windowSpec) == 40, "window page must hold every row")
+      assert(windowSpec and table.getn(windowSpec) == 39, "window page must hold every row")
       assert(windowSpec[1].key == "combatHeader" and windowSpec[1].widget == "header")
       Skada.Options:OpenPage("general")
       local capturedScroll = -1
@@ -216,12 +216,13 @@ def run(ctx: Context):
         "combat rows must be visible without scrolling")
       -- the remaining sections live further down the single page
       assert(not rowForKey.mode:IsShown(), "mode rows must sit below the fold until scrolled")
-      -- no row may render up in the page header band: a shown row's top edge
-      -- must stay at or below the content area's top (headerPad down the pane)
+      -- no row may render up in the page header band: a shown row's bottom
+      -- edge must stay at or below the content area's top (headerPad down the
+      -- pane); any part above it is masked by the opaque header cover
       local i, row
       for i = 1, table.getn(winPage.rows) do
         row = winPage.rows[i]
-        assert(not row:IsShown() or row.rowTop >= Skada.Options.scrollOffset,
+        assert(not row:IsShown() or row.rowBottom >= Skada.Options.scrollOffset,
           "row " .. tostring(row.key) .. " scrolled over the page header")
       end
       local wheels
@@ -233,7 +234,7 @@ def run(ctx: Context):
         "rows scrolled past the header band must hide, not draw over it")
       for i = 1, table.getn(winPage.rows) do
         row = winPage.rows[i]
-        assert(not row:IsShown() or row.rowTop >= Skada.Options.scrollOffset,
+        assert(not row:IsShown() or row.rowBottom >= Skada.Options.scrollOffset,
           "row " .. tostring(row.key) .. " scrolled over the page header")
       end
       -- at the bottom of the page the thumb must sit at the end of its track

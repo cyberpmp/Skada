@@ -43,6 +43,24 @@ local Renderer = Skada.UIRowRenderer
 UI.CreateRow = Renderer.CreateRow
 UI.EnsureRows = Renderer.EnsureRows
 UI.ApplyLayout = Renderer.ApplyLayout
+
+-- Every drag surface (title bar, window background, hidden-header menu slot,
+-- meter bar) shares one move/snap/persist sequence; flagName names the
+-- per-surface "this was a drag, swallow the click" marker its OnClick reads.
+function UI:BeginWindowDrag(flagName)
+  if self.db.locked then return end
+  self.manager:SetActive(self)
+  if self.actionMenu then self.actionMenu:Hide() end
+  self[flagName] = true
+  self.frame:StartMoving()
+end
+
+function UI:EndWindowDrag()
+  self.frame:StopMovingOrSizing()
+  self.manager:SnapWindow(self)
+  persistGeometry(self, true)
+  Skada:MarkDirty()
+end
 UI.GetPinnedPlayerEntry = Renderer.GetPinnedPlayerEntry
 UI.PaintRows = Renderer.PaintRows
 UI.AnimateAll = Renderer.AnimateAll
@@ -114,8 +132,8 @@ end
 function UI:SelectEntry(entry)
   if not entry then return end
   if entry.modeKey then
-    self.db.mode = entry.modeKey
-    if Skada.Modes:Get(entry.modeKey).live then self.db.segment = "current" end
+    -- through Modes:Set so auto-named windows follow the mode's title
+    Skada.Modes:Set(entry.modeKey, self)
     self.manager:SyncLegacy(self)
     self:SetView("mode")
   elseif entry.segment ~= nil then
@@ -186,7 +204,7 @@ function UI:InitializeWindow(config)
   self.frame = frame
   frame:SetFrameStrata("LOW")
   frame:SetBackdrop(backdrop)
-  Style:ApplyMeterWindow(frame, false)
+  Style:ApplyMeterWindow(frame, false, Style:GetWindowOpacity(config))
   frame:EnableMouseWheel(true)
   frame:SetScript("OnMouseWheel", function(_, delta)
     delta = getWheelDelta(delta)
@@ -197,15 +215,10 @@ function UI:InitializeWindow(config)
   end)
   frame:RegisterForDrag("LeftButton")
   frame:SetScript("OnDragStart", function()
-    owner.manager:SetActive(owner)
-    owner.actionMenu:Hide()
-    owner.headerWasDragged = true
-    if not config.locked then frame:StartMoving() end
+    owner:BeginWindowDrag("headerWasDragged")
   end)
   frame:SetScript("OnDragStop", function()
-    frame:StopMovingOrSizing()
-    owner.manager:SnapWindow(owner)
-    persistGeometry(owner, true)
+    owner:EndWindowDrag()
   end)
 
   local header = CreateFrame("Button", nil, frame)
@@ -275,16 +288,10 @@ function UI:InitializeWindow(config)
   Style:ApplyHeader(self)
 
   header:SetScript("OnDragStart", function()
-    owner.manager:SetActive(owner)
-    owner.actionMenu:Hide()
-    owner.headerWasDragged = true
-    if not config.locked then frame:StartMoving() end
+    owner:BeginWindowDrag("headerWasDragged")
   end)
   header:SetScript("OnDragStop", function()
-    frame:StopMovingOrSizing()
-    owner.manager:SnapWindow(owner)
-
-    persistGeometry(owner, true)
+    owner:EndWindowDrag()
   end)
   header:SetScript("OnClick", function(self, button)
     button = getClickButton(button)
@@ -324,15 +331,10 @@ function UI:InitializeWindow(config)
   clickCatcher:RegisterForClicks("LeftButtonUp", "RightButtonUp")
   clickCatcher:RegisterForDrag("LeftButton")
   clickCatcher:SetScript("OnDragStart", function()
-    owner.manager:SetActive(owner)
-    owner.actionMenu:Hide()
-    owner.headerWasDragged = true
-    if not config.locked then frame:StartMoving() end
+    owner:BeginWindowDrag("headerWasDragged")
   end)
   clickCatcher:SetScript("OnDragStop", function()
-    frame:StopMovingOrSizing()
-    owner.manager:SnapWindow(owner)
-    persistGeometry(owner, true)
+    owner:EndWindowDrag()
   end)
   clickCatcher:SetScript("OnClick", function(self, button)
     button = getClickButton(button)
@@ -357,6 +359,10 @@ function UI:InitializeWindow(config)
     GameTooltip:Show()
   end)
   clickCatcher:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  -- Created before the rows and at their default level it would lose
+  -- hit-testing to row 1; sit above the rows or the hidden-header menu
+  -- bar slot never receives clicks.
+  clickCatcher:SetFrameLevel(frame:GetFrameLevel() + 2)
   clickCatcher:Hide()
 
   local resizeButton = CreateFrame("Button", nil, frame)
@@ -420,20 +426,22 @@ function UI:SetActive(window)
   for i = 1, table_getn(self.windows) do
     candidate = self.windows[i]
     if candidate ~= window and candidate.actionMenu then candidate.actionMenu:Hide() end
-    Style:ApplyMeterWindow(candidate.frame, candidate == window)
+    Style:ApplyMeterWindow(candidate.frame, candidate == window, Style:GetWindowOpacity(candidate.db))
     Style:ApplyHeader(candidate)
   end
 end
 
--- Drops the "selected" border highlight without touching the active-window
--- logic; used when the settings window closes so no meter is left looking
--- picked.
+-- Drops the "selected" border highlight when the settings window closes so
+-- no meter is left looking picked. The logical target follows the visual:
+-- with nothing highlighted, GetActive falls back to the primary window
+-- instead of silently acting on the last-edited meter.
 function UI:ClearSelectionVisual()
   self.visualActive = nil
+  self.activeWindow = nil
   local i, candidate
   for i = 1, table_getn(self.windows) do
     candidate = self.windows[i]
-    Style:ApplyMeterWindow(candidate.frame, false)
+    Style:ApplyMeterWindow(candidate.frame, false, Style:GetWindowOpacity(candidate.db))
     Style:ApplyHeader(candidate)
   end
 end
@@ -464,6 +472,9 @@ function UI:CreateNew(name)
   local config = { id = id }
   applyWindowDefaults(config, source and source.db or profile)
   config.name = name and name ~= "" and name or Skada.Modes:Get(config.mode).title
+  -- a name supplied here is the user's own; an inherited name never is, or
+  -- the new window would never follow its mode's title
+  config.nameIsCustom = name ~= nil and name ~= ""
   config.visible = true
   config.x = (source and source.db.x or 0) + 28
   config.y = (source and source.db.y or 0) - 28
@@ -530,15 +541,24 @@ end
 
 function UI:ApplyCombatState(inCombat)
   local combatMode = self.db.combatMode
+  local renamed = false
   if inCombat and combatMode and combatMode ~= "" and combatMode ~= self.db.mode then
-    if self.db.returnAfterCombat then self.restoreMode = self.db.mode end
-    Skada.Modes:Set(combatMode, self)
+    -- keep the pre-combat mode; a later call must not overwrite it with the
+    -- already-switched mode
+    if self.db.returnAfterCombat and not self.restoreMode then
+      self.restoreMode = self.db.mode
+    end
+    local _, modeRenamed = Skada.Modes:Set(combatMode, self)
+    renamed = modeRenamed
   elseif not inCombat and self.restoreMode then
-    Skada.Modes:Set(self.restoreMode, self)
+    local _, modeRenamed = Skada.Modes:Set(self.restoreMode, self)
+    renamed = modeRenamed
     self.restoreMode = nil
   end
+  -- unchecking "return after combat" mid-fight must drop the pending restore
+  if inCombat and not self.db.returnAfterCombat then self.restoreMode = nil end
   if Skada.Modes:Get(self.db.mode).live then self.db.segment = "current" end
-  if not self.db.autoSwitch then return end
+  if not self.db.autoSwitch then return renamed end
   if not Skada.Modes:Get(self.db.mode).live then
     self.db.segment = inCombat and "current" or "total"
   end
@@ -546,12 +566,19 @@ function UI:ApplyCombatState(inCombat)
   self.view = "mode"
   self.scrollOffset = 0
   self.manager:SyncLegacy(self)
+  return renamed
 end
 
 function UI:OnCombatState(inCombat)
-  local i
-  for i = 1, table_getn(self.windows) do self.windows[i]:ApplyCombatState(inCombat) end
+  local i, renamed
+  renamed = false
+  for i = 1, table_getn(self.windows) do
+    if self.windows[i]:ApplyCombatState(inCombat) then renamed = true end
+  end
   Skada:MarkDirty()
+  if renamed and Skada.Options and Skada.Options.frame and Skada.OptionsShell then
+    Skada.OptionsShell.RebuildTree(Skada.Options)
+  end
 end
 
 function UI:ResetViews(resetSegments)

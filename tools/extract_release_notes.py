@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import sys
+
+if sys.version_info < (3, 10):
+    sys.exit("extract_release_notes.py requires Python 3.10+ (uses str.removeprefix "
+             "and Path.write_text(newline=)); CI pins 3.12.")
+
 import argparse
 import re
 from pathlib import Path
