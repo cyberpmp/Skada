@@ -1,0 +1,415 @@
+"""Suite: options - profile defaults, settings panel, reset policies, minimap."""
+
+from harness import Context
+
+
+def run(ctx: Context):
+    skada = ctx.skada
+    assert skada.db.profile.classColors is True
+    assert skada.db.profile.fontName == "Interface\\AddOns\\Skada\\media\\Accidental Presidency.ttf"
+    assert skada.db.profile.minimap.show is True
+    assert skada.Options.minimapButton is not None
+
+    ctx.run(r'''
+      Skada.Options:Open()
+      assert(Skada.Options.frame and Skada.Options.frame:IsShown())
+      assert(Skada.Options.title.textValue == "SKADA")
+      assert(Skada.Options.subtitle.textValue == "Meter settings")
+      assert(Skada.Options.frame.backdropR == 0.026 and Skada.Options.frame.backdropA == 0.99)
+      assert(Skada.Options.viewport.backdropA == 0 and Skada.Options.viewport.borderA == 0)
+      assert(Skada.Options.treePanel.backdropA == 0 and Skada.Options.treePanel.borderA == 0)
+      assert(Skada.Options.title.textR == 0.92 and Skada.UIStyle.UI_ACCENT_R == 0.38)
+      assert(Skada.Options.scrollbar.width == 10)
+      assert(Skada.Options.scrollbar.track.width == 6 and Skada.Options.scrollbar.thumb.width == 6)
+      assert(not rawget(Skada.Options.scrollbar, "up") and not rawget(Skada.Options.scrollbar, "down"))
+      local capturedScroll = -1
+      local modernScroll = Skada.Options.kit.createScrollbar(Skada.Options.frame,
+        Skada.Options.viewport, function(offset) capturedScroll = offset end)
+      modernScroll.track.height, modernScroll.track.top = 400, 400
+      modernScroll:SetRange(800, 400)
+      modernScroll:Update(0)
+      assert(modernScroll.thumb.height == 200)
+      GetCursorPosition = function() return 0, 300 end
+      modernScroll.track.OnClick()
+      assert(capturedScroll == 100, capturedScroll)
+      modernScroll.thumb.top = 400
+      GetCursorPosition = function() return 0, 350 end
+      modernScroll.thumb.OnMouseDown()
+      assert(rawget(modernScroll, "OnUpdate"))
+      GetCursorPosition = function() return 0, 250 end
+      modernScroll.OnUpdate()
+      assert(capturedScroll == 200, capturedScroll)
+      modernScroll.thumb.OnMouseUp()
+      assert(not rawget(modernScroll, "OnUpdate"))
+      GetCursorPosition = nil
+      assert(Skada.Options.frame.alpha == 0.38 and rawget(Skada.Options.frame, "OnUpdate"))
+      Skada.Options.frame.OnUpdate(Skada.Options.frame, 0.13)
+      assert(Skada.Options.frame.alpha == 1 and not rawget(Skada.Options.frame, "OnUpdate"))
+      local primary = Skada.UI:GetPrimary()
+      assert(Skada.Options.selectedWindow == primary)
+
+      assert(Skada.Options.currentPage == "general")
+      local generalPage = Skada.Options.pageCache.general
+      assert(generalPage.description.textValue == "Core behavior and everyday conveniences.")
+      assert(generalPage.description:IsShown() and generalPage.rule:IsShown())
+      assert(generalPage.content.alpha == 0.48 and rawget(generalPage.content, "OnUpdate"))
+      generalPage.content.OnUpdate(generalPage.content, 0.11)
+      assert(generalPage.content.alpha == 1 and not rawget(generalPage.content, "OnUpdate"))
+      Skada.Options:OpenPage("data")
+      assert(Skada.Options.currentPage == "data")
+      assert(not generalPage.description:IsShown() and not generalPage.rule:IsShown())
+      Skada.Options:OpenPage("window")
+      assert(Skada.Options.currentPage == "window")
+      Skada.Options:OpenPage("general")
+
+      local i, control
+      for i = 1, table.getn(Skada.Options.controls) do
+        control = Skada.Options.controls[i]
+        assert(control.width and control.width > 0,
+          "settings control " .. i .. " has no width")
+      end
+      for i = 1, table.getn(Skada.Options.treeRows) do
+        control = Skada.Options.treeRows[i]
+        assert(control.width and control.width > 0,
+          "tree node row " .. i .. " has no width")
+      end
+
+      local second = Skada.UI:CreateNew("Settings meter")
+      Skada.Options:CycleWindow(1)
+      assert(Skada.Options.selectedWindow == second)
+      assert(Skada.UI:GetActive() == second)
+      Skada.Options:CycleWindow(1)
+      assert(Skada.Options.selectedWindow == primary)
+      Skada.Options:CycleWindow(-1)
+      assert(Skada.Options.selectedWindow == second)
+
+      second.db.width = 321
+      Skada.Options.frame:Hide()
+      Skada.Options:Open()
+      assert(Skada.Options.selectedWindow == second and second.db.width == 321)
+
+      Skada.db.profile.fontName = "Interface\\AddOns\\Skada\\media\\Accidental Presidency.ttf"
+      local fontRow
+      for i = 1, table.getn(Skada.Options.controls) do
+        local row = Skada.Options.controls[i]
+        if rawget(row, "key") == "fontName" then fontRow = row break end
+      end
+      assert(fontRow, "bar font dropdown row not found")
+      fontRow.chrome.OnClick()
+      assert(fontRow.menuFrame, "font dropdown menu frame was not created")
+      local function pickFont(value)
+        TestDropdownInfos = {}
+        fontRow.menuFrame.initialize(fontRow.menuFrame, 1)
+        local j, info
+        for j = 1, table.getn(TestDropdownInfos) do
+          info = TestDropdownInfos[j]
+          if info.value == value then info.func() return end
+        end
+        error("font dropdown is missing a choice: " .. value)
+      end
+      pickFont("Fonts\\FRIZQT__.TTF")
+      assert(Skada.db.profile.fontName == "Fonts\\FRIZQT__.TTF")
+      pickFont("Interface\\AddOns\\Skada\\media\\Accidental Presidency.ttf")
+      assert(Skada.db.profile.fontName == "Interface\\AddOns\\Skada\\media\\Accidental Presidency.ttf")
+
+      local checkRow
+      for i = 1, table.getn(Skada.Options.controls) do
+        local row = Skada.Options.controls[i]
+        if rawget(row, "setValue") and rawget(row, "label") == "Merge pets into owners" then checkRow = row break end
+      end
+      assert(checkRow, "merge pets checkbox row not found")
+      local before = Skada.db.profile.mergePets
+      local flipped = not before
+      checkRow.setValue(flipped)
+      assert(Skada.db.profile.mergePets == flipped)
+      checkRow.setValue(before)
+
+      local sliderRow
+      for i = 1, table.getn(Skada.Options.controls) do
+        local row = Skada.Options.controls[i]
+        if rawget(row, "label") == "Font size" then sliderRow = row break end
+      end
+      assert(sliderRow, "font size slider row not found")
+      local target = Skada.Options.selectedWindow
+      GetCursorPosition = function() return 500, 300 end
+      sliderRow.track.left = 2
+      sliderRow.OnMouseDown()
+      assert(target.db.fontSize == 22, target.db.fontSize)
+      GetCursorPosition = function() return 200, 300 end
+      sliderRow.OnMouseDown()
+      assert(target.db.fontSize == 15, target.db.fontSize)
+      sliderRow.OnMouseUp()
+
+      local widthRow
+      for i = 1, table.getn(Skada.Options.controls) do
+        local row = Skada.Options.controls[i]
+        if rawget(row, "label") == "Width" then widthRow = row break end
+      end
+      assert(widthRow, "width slider row not found")
+      local profileWidthBefore = Skada.db.profile.width
+      GetCursorPosition = function() return 205, 300 end
+      widthRow.track.left = 2
+      widthRow.OnMouseDown()
+      widthRow.OnMouseUp()
+      assert(Skada.Options.selectedWindow == second)
+      assert(second.db.width ~= 321 and second.db.width >= Skada.UIStyle.MIN_WINDOW_WIDTH and second.db.width <= 600,
+        second.db.width)
+      assert(Skada.db.profile.width == profileWidthBefore,
+        "secondary window design key leaked into the profile mirror")
+      Skada.UI:SetActive(primary)
+      Skada.Options:SelectWindow(primary)
+      assert(Skada.Options.selectedWindow == primary)
+      GetCursorPosition = function() return 500, 300 end
+      widthRow.OnMouseDown()
+      widthRow.OnMouseUp()
+      assert(Skada.db.profile.width == primary.db.width,
+        "primary window design key was not mirrored into the profile")
+
+      Skada.Options:OpenPage("window")
+      local winPage = Skada.Options.pageCache.window
+      assert(winPage and winPage.strip, "window page tab strip missing")
+      assert(winPage.activeTab == "design", winPage.activeTab)
+      local rowForKey = {}
+      local i
+      for i = 1, table.getn(winPage.rows) do
+        local row = winPage.rows[i]
+        if row.key then rowForKey[row.key] = row end
+      end
+      assert(rowForKey.width and rowForKey.name and rowForKey.mode and rowForKey.segment
+        and rowForKey.deleteWindow, "window page rows missing")
+      assert(rowForKey.width:IsShown(), "design row should be visible on its tab")
+      winPage.strip:SetSelected("mode")
+      assert(winPage.activeTab == "mode", winPage.activeTab)
+      assert(Skada.Options.uiTabs.window == "mode", "active tab not remembered")
+      assert(not rowForKey.width:IsShown(), "design row must hide on the mode tab")
+      Skada.Options.viewport.OnMouseWheel(nil, -1)
+      Skada.Options.viewport.OnMouseWheel(nil, -1)
+      Skada.Options.viewport.OnMouseWheel(nil, -1)
+      Skada.Options.viewport.OnMouseWheel(nil, -1)
+      assert(rowForKey.segment:IsShown(), "mode-tab row should enter the scroll band")
+      winPage.strip:SetSelected("design")
+      assert(rowForKey.width:IsShown(), "design row should return with its tab")
+
+      Skada.Options:SelectWindow(second)
+      assert(Skada.Options.currentPage == "window")
+      local function pickDropdown(row, value)
+        TestDropdownInfos = {}
+        row.chrome.OnClick()
+        assert(row.menuFrame, "dropdown menu frame was not created for " .. tostring(row.key))
+        row.menuFrame.initialize(row.menuFrame, 1)
+        local j, info
+        for j = 1, table.getn(TestDropdownInfos) do
+          info = TestDropdownInfos[j]
+          if info.value == value then info.func() return end
+        end
+        error("dropdown " .. tostring(row.key) .. " is missing a choice: " .. value)
+      end
+      local modeBefore = second.db.mode
+      pickDropdown(rowForKey.mode, "healing")
+      assert(second.db.mode == "healing", second.db.mode)
+      pickDropdown(rowForKey.mode, "threat")
+      assert(second.db.mode == "threat" and second.db.segment == "current",
+        "live mode did not coerce the segment")
+      pickDropdown(rowForKey.mode, modeBefore)
+      assert(second.db.mode == modeBefore)
+
+      pickDropdown(rowForKey.segment, 1)
+      assert(second.db.segment == 1, second.db.segment)
+      pickDropdown(rowForKey.segment, "total")
+      assert(second.db.segment == "total", second.db.segment)
+      pickDropdown(rowForKey.segment, "current")
+      assert(second.db.segment == "current", second.db.segment)
+
+      rowForKey.name.setValue("Renamed meter")
+      assert(second.db.name == "Renamed meter", second.db.name)
+
+      local wasVisible = second.db.visible
+      rowForKey.visible.setValue(false)
+      assert(second.db.visible == false and not second.frame:IsShown(),
+        "visibility checkbox did not hide the window")
+      rowForKey.visible.setValue(true)
+      assert(second.db.visible == true and second.frame:IsShown(),
+        "visibility checkbox did not reshow the window")
+      if not wasVisible then rowForKey.visible.setValue(false) end
+
+      local newBtn
+      for i = 1, table.getn(Skada.Options.treeRows) do
+        local nodeRow = Skada.Options.treeRows[i]
+        if type(nodeRow.node) == "table" and nodeRow.node.newWindow then newBtn = nodeRow break end
+      end
+      assert(newBtn, "+ New window tree node not found")
+      newBtn.OnClick()
+      local third = Skada.Options.selectedWindow
+      assert(third and third ~= second and third ~= primary, "new window was not created and selected")
+      assert(third.db.name == Skada.Modes:Get(third.db.mode).title,
+        "unnamed window must default to its tracked mode's title")
+      assert(Skada.UI.byID[third.db.id] == third, "created window missing from the registry")
+      local windowNodes = 0
+      for i = 1, table.getn(Skada.Options.treeRows) do
+        local nodeRow = Skada.Options.treeRows[i]
+        if type(nodeRow.node) == "table" and nodeRow.node.window then windowNodes = windowNodes + 1 end
+      end
+      assert(windowNodes == 3, windowNodes)
+
+      Skada.Options:SelectWindow(third)
+      rowForKey.deleteWindow.OnClick()
+      assert(TestLastPopup == "SKADA_DELETE_WINDOW", tostring(TestLastPopup))
+      assert(Skada.UI.byID[third.db.id] == third, "delete popup must not delete before accept")
+      assert(StaticPopupDialogs.SKADA_DELETE_WINDOW, "delete dialog not registered")
+      StaticPopupDialogs.SKADA_DELETE_WINDOW.OnAccept()
+      assert(Skada.UI.byID[third.db.id] == nil, "accepted delete did not remove the window")
+      assert(Skada.Options.selectedWindow == primary, "panel did not fall back after delete")
+      windowNodes = 0
+      for i = 1, table.getn(Skada.Options.treeRows) do
+        local nodeRow = Skada.Options.treeRows[i]
+        if type(nodeRow.node) == "table" and nodeRow.node.window then windowNodes = windowNodes + 1 end
+      end
+      assert(windowNodes == 2, windowNodes)
+
+      local profile = Skada.db.profile
+      assert(Skada.Common.FormatNumber(1234) == "1234")
+      assert(Skada.Common.FormatNumber(12345) == "12k")
+      assert(Skada.Common.FormatNumber(1234567) == "1.23m")
+      assert(Skada.Common.FormatNumber(1234, "compact1") == "1.2k")
+      assert(Skada.Common.FormatNumber(12345, "compact1") == "12.3k")
+      assert(Skada.Common.FormatNumber(1234567, "compact1") == "1.2m")
+      assert(Skada.Common.FormatNumber(1234, "full") == "1234")
+      assert(Skada.Common.FormatNumber(12345, "full") == "12345")
+      assert(Skada.Common.FormatNumber(1234567, "full") == "1234567")
+      profile.numberFormat = "full"
+      assert(Skada:FormatNumber(12345) == "12345")
+      profile.numberFormat = "compact"
+      assert(Skada:FormatNumber(12345) == "12k")
+
+      Skada.Options:OpenPage("data")
+      local numberRow
+      for i = 1, table.getn(Skada.Options.controls) do
+        local row = Skada.Options.controls[i]
+        if rawget(row, "key") == "numberFormat" then numberRow = row break end
+      end
+      assert(numberRow, "number format dropdown row not found")
+      pickDropdown(numberRow, "compact1")
+      assert(profile.numberFormat == "compact1", profile.numberFormat)
+      pickDropdown(numberRow, "compact")
+
+      local maxRow
+      for i = 1, table.getn(Skada.Options.controls) do
+        local row = Skada.Options.controls[i]
+        if rawget(row, "key") == "maxSegments" then maxRow = row break end
+      end
+      assert(maxRow, "max segments slider row not found")
+      profile.maxSegments = 10
+      GetCursorPosition = function() return 205, 300 end
+      maxRow.track.left = 2
+      maxRow.OnMouseDown()
+      maxRow.OnMouseUp()
+      assert(profile.maxSegments >= 1 and profile.maxSegments <= 50, profile.maxSegments)
+      assert(table.getn(Skada.Data.history) <= profile.maxSegments,
+        "history was not trimmed to the slider value")
+
+      local resetRow
+      for i = 1, table.getn(Skada.Options.pageCache.data.rows) do
+        local row = Skada.Options.pageCache.data.rows[i]
+        if rawget(row, "key") == "resetData" then resetRow = row break end
+      end
+      assert(resetRow, "reset data action row not found")
+      table.insert(Skada.Data.history, Skada.Data.current)
+      resetRow.OnClick()
+      assert(TestLastPopup == "SKADA_RESET_DATA", tostring(TestLastPopup))
+      assert(table.getn(Skada.Data.history) >= 1, "reset popup must not clear before accept")
+      StaticPopupDialogs.SKADA_RESET_DATA.OnAccept()
+      assert(table.getn(Skada.Data.history) == 0, "accepted reset did not clear history")
+
+      local function fire(event)
+        local handlers = Skada.eventHandlers[event]
+        local h
+        for h = 1, table.getn(handlers) do handlers[h]() end
+      end
+      assert(StaticPopupDialogs.SKADA_RESET_POLICY, "reset-policy dialog not registered")
+      profile.resetOnEnterInstance = "no"
+      fire("ZONE_CHANGED_NEW_AREA")
+      table.insert(Skada.Data.history, Skada.Data.current)
+      profile.resetOnEnterInstance = "yes"
+      IsInInstance = function() return true end
+      fire("ZONE_CHANGED_NEW_AREA")
+      assert(table.getn(Skada.Data.history) == 0, "policy 'yes' did not reset on instance enter")
+      profile.resetOnEnterInstance = "ask"
+      IsInInstance = function() return false end
+      fire("ZONE_CHANGED_NEW_AREA")
+      IsInInstance = function() return true end
+      fire("ZONE_CHANGED_NEW_AREA")
+      assert(TestLastPopup == "SKADA_RESET_POLICY", tostring(TestLastPopup))
+      table.insert(Skada.Data.history, Skada.Data.current)
+      Skada.Data.active = true
+      fire("ZONE_CHANGED_NEW_AREA")
+      assert(table.getn(Skada.Data.history) == 1, "reset fired while a segment was active")
+      Skada.Data.active = false
+      IsInInstance = nil
+
+      profile.resetOnJoinGroup = "yes"
+      profile.resetOnLeaveGroup = "no"
+      local savedGetNumRaidMembers = GetNumRaidMembers
+      local savedGetNumPartyMembers = GetNumPartyMembers
+      GetNumRaidMembers = function() return 0 end
+      GetNumPartyMembers = function() return 0 end
+      fire("RAID_ROSTER_UPDATE")
+      table.insert(Skada.Data.history, Skada.Data.current)
+      GetNumRaidMembers = function() return 10 end
+      fire("RAID_ROSTER_UPDATE")
+      assert(table.getn(Skada.Data.history) == 0, "policy 'yes' did not reset on group join")
+
+      table.insert(Skada.Data.history, Skada.Data.current)
+      GetNumRaidMembers = function() return 11 end
+      fire("RAID_ROSTER_UPDATE")
+      assert(table.getn(Skada.Data.history) == 1, "member joining an existing raid triggered a reset")
+      profile.resetOnLeaveGroup = "yes"
+      GetNumRaidMembers = function() return 10 end
+      fire("RAID_ROSTER_UPDATE")
+      assert(table.getn(Skada.Data.history) == 1, "member leaving an existing raid triggered a reset")
+
+      GetNumRaidMembers = function() return 0 end
+      fire("RAID_ROSTER_UPDATE")
+      assert(table.getn(Skada.Data.history) == 0, "policy 'yes' did not reset on group leave")
+      GetNumRaidMembers = savedGetNumRaidMembers
+      GetNumPartyMembers = savedGetNumPartyMembers
+
+      Skada.Options:OpenPage("window")
+      Skada.Options:SelectWindow(second)
+      local snapBefore = profile.snapDistance
+      GetCursorPosition = function() return 205, 300 end
+      rowForKey.snapDistance.track.left = 2
+      rowForKey.snapDistance.OnMouseDown()
+      rowForKey.snapDistance.OnMouseUp()
+      assert(second.db.snapDistance ~= nil and second.db.snapDistance >= 0 and second.db.snapDistance <= 40,
+        second.db.snapDistance)
+      assert(profile.snapDistance == snapBefore,
+        "secondary window snap key leaked into the profile mirror")
+      Skada.Options:SelectWindow(primary)
+      GetCursorPosition = function() return 500, 300 end
+      rowForKey.snapDistance.OnMouseDown()
+      rowForKey.snapDistance.OnMouseUp()
+      assert(profile.snapDistance == primary.db.snapDistance,
+        "primary window snap key was not mirrored into the profile")
+
+      local miniRow
+      for i = 1, table.getn(Skada.Options.controls) do
+        local row = Skada.Options.controls[i]
+        if rawget(row, "key") == "minimap" then miniRow = row break end
+      end
+      assert(miniRow, "minimap checkbox row not found")
+      miniRow.setValue(false)
+      assert(Skada.db.profile.minimap.show == false)
+      assert(not Skada.Options.minimapButton:IsShown())
+      miniRow.setValue(true)
+      assert(Skada.db.profile.minimap.show == true)
+      assert(Skada.Options.minimapButton:IsShown())
+
+      Skada.Options:Toggle()
+      assert(not Skada.Options.frame:IsShown())
+      Skada.Options:Toggle()
+      assert(Skada.Options.frame:IsShown())
+      Skada.Options.frame:Hide()
+
+      Skada.UI:SetActive(primary)
+      assert(Skada.UI:DeleteWindow(second))
+    ''')
