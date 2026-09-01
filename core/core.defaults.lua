@@ -13,7 +13,6 @@ Defaults.schema = {
     barSpacing = 2,
     fontSize = 15,
     barAlpha = 0.90,
-    scale = 1,
     updateRate = 0.25,
     mode = "damage",
     segment = "current",

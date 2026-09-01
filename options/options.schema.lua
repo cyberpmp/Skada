@@ -104,6 +104,10 @@ function Schema.RenameSet()
     -- a hand-set name is the user's own; the mode switcher must not take it back
     window.db.nameIsCustom = true
     if window.title then window.title:SetText(value) end
+    if Skada.Options.frame and Skada.OptionsShell then
+      -- the tree reads db.name at build time; keep its label current
+      Skada.OptionsShell.RebuildTree(Skada.Options)
+    end
     Skada:MarkDirty()
   end
 end
@@ -347,7 +351,7 @@ Schema.pages = {
           {
             key = "rows", widget = "slider",
             label = "Rows",
-            description = "Number of visible meter bars.",
+            description = "Number of visible meter bars. The window grows or shrinks to fit: title bar + rows x (bar height + spacing) + footer.",
             min = 3, max = 30, step = 1,
             format = function(value) return tostring(floor(value)) end,
             get = Schema.WindowGet("rows"),
@@ -356,7 +360,7 @@ Schema.pages = {
           {
             key = "barHeight", widget = "slider",
             label = "Bar height",
-            description = "Height of each meter bar.",
+            description = "Height of each meter bar. Together with spacing this is the distance from one bar's top to the next.",
             min = 10, max = 30, step = 1,
             format = function(value) return tostring(floor(value)) .. " px" end,
             get = Schema.WindowGet("barHeight"),
@@ -365,7 +369,7 @@ Schema.pages = {
           {
             key = "barSpacing", widget = "slider",
             label = "Bar spacing",
-            description = "Gap between meter bars.",
+            description = "Gap between meter bars. Bars sit barHeight + spacing apart; the window height follows.",
             min = 0, max = 8, step = 1,
             format = function(value) return tostring(floor(value)) .. " px" end,
             get = Schema.WindowGet("barSpacing"),
@@ -374,29 +378,23 @@ Schema.pages = {
           {
             key = "barAlpha", widget = "slider",
             label = "Bar opacity",
-            description = "Transparency of the bar fills.",
-            min = 0.3, max = 1, step = 0.02,
+            description = "Transparency of the bar fills. Drag to 0% to hide the fills and keep only names and numbers.",
+            min = 0, max = 1, step = 0.02,
             format = function(value) return tostring(floor(value * 100 + 0.5)) .. "%" end,
             get = Schema.WindowGet("barAlpha"),
             set = Schema.WindowSet("barAlpha", true),
           },
           {
-            key = "scale", widget = "slider",
-            label = "Window scale",
-            description = "Overall window size multiplier.",
-            min = 0.6, max = 1.5, step = 0.05,
-            format = function(value) return string_format("%.2fx", value) end,
-            get = Schema.WindowGet("scale"),
-            set = Schema.WindowSet("scale", true),
-          },
-          {
             key = "windowOpacity", widget = "slider",
             label = "Window opacity",
-            description = "Opacity of the dark meter-window background. Shared by all windows. Drag to 0% for a fully transparent window.",
+            description = "Opacity of this window's background: backdrop, row backs, and title bar. Drag to 0% for a fully transparent window with floating bars.",
             min = 0, max = 1, step = 0.05,
             format = function(value) return tostring(floor(value * 100 + 0.5)) .. "%" end,
-            get = function() return Skada.db.profile.windowOpacity or 0.9 end,
-            set = Schema.AppearanceSet("windowOpacity", true),
+            get = function()
+              local window = Skada.Options and Skada.Options:GetCurrentWindow()
+              return window and window.db.windowOpacity or 0.9
+            end,
+            set = Schema.WindowSet("windowOpacity", true),
           },
           {
             key = "hideWindowBorder", widget = "checkbox",
@@ -533,11 +531,11 @@ Schema.pages = {
             set = function(value)
               local window = Skada.Options and Skada.Options:GetCurrentWindow()
               if not window then return end
-              Skada.Modes:Set(value, window)
+              local _, renamed = Skada.Modes:Set(value, window)
               if Skada.Options.frame then
                 Skada.Options:RefreshPage()
                 -- auto-named windows rename with the mode; keep the tree label current
-                if Skada.OptionsShell then Skada.OptionsShell.RebuildTree(Skada.Options) end
+                if renamed and Skada.OptionsShell then Skada.OptionsShell.RebuildTree(Skada.Options) end
               end
             end,
           },

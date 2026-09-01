@@ -129,10 +129,15 @@ function Modes:Cycle(direction, window)
   index = index + (direction or 1)
   if index > table_getn(self.list) then index = 1 end
   if index < 1 then index = table_getn(self.list) end
-  config.mode = self.list[index].key
-  if self.list[index].live then config.segment = "current" end
-  DataNavigation:OnModeChanged(window)
-  Skada:MarkDirty()
+  return self:Set(self.list[index].key, window)
+end
+
+function Modes:IsTitle(name)
+  local i
+  for i = 1, table_getn(self.list) do
+    if name == self.list[i].title then return true end
+  end
+  return false
 end
 
 -- A window keeps its own name once the user has renamed it; auto-named
@@ -141,15 +146,13 @@ end
 function Modes:IsAutoNamed(config)
   if config.nameIsCustom then return false end
   if config.name == nil then return true end
-  local i
-  for i = 1, table_getn(self.list) do
-    if config.name == self.list[i].title then return true end
-  end
-  return false
+  return self:IsTitle(config.name)
 end
 
+-- Sets the mode and returns found, renamed so callers can refresh tree
+-- labels only when an auto-name actually followed the mode.
 function Modes:Set(value, window)
-  if not value then return false end
+  if not value then return false, false end
   window = window or (Skada.UI and Skada.UI.GetActive and Skada.UI:GetActive())
   local config = window and window.db or Skada.db.profile
   local lowered = string.lower(value)
@@ -159,14 +162,21 @@ function Modes:Set(value, window)
     if string.lower(mode.key) == lowered or string.lower(mode.title) == lowered then
       config.mode = mode.key
       if mode.live then config.segment = "current" end
+      local renamed = false
       if window and window.db == config and self:IsAutoNamed(config) and config.name ~= mode.title then
         config.name = mode.title
         if window.title then window.title:SetText(config.name) end
+        renamed = true
+      end
+      if window and window.db == config and Skada.Data and Skada.Data.clientInCombat
+          and mode.key ~= config.combatMode then
+        -- a mode picked by hand mid-fight wins over the pending combat restore
+        window.restoreMode = nil
       end
       DataNavigation:OnModeChanged(window)
       Skada:MarkDirty()
-      return true
+      return true, renamed
     end
   end
-  return false
+  return false, false
 end

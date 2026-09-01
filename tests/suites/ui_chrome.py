@@ -46,7 +46,9 @@ def run(ctx: Context):
       assert(meter.autoButton.skadaActive and not rawget(meter.autoButton, "activeMarker"))
       assert(meter.autoButton.text.textR == 0.2 and meter.autoButton.text.textG == 1 and
         meter.autoButton.text.textB == 0.2)
-      assert(meter.headerRule and meter.headerRule.vertexA == 0.52)
+      assert(meter.headerRule and
+        meter.headerRule.alpha == 0.52 * meter.db.windowOpacity,
+        "active header rule must fade with window opacity")
       assert(meter.title.textR == 0.94 and meter.title.textG == 0.95 and meter.title.textB == 0.98)
 
       local menu = meter.actionMenu
@@ -82,6 +84,28 @@ def run(ctx: Context):
       assert(meter.title.lastPoint == "RIGHT" and meter.title.lastRelativeTo == meter.modeButton)
       meter.db.width, meter.layoutDirty = defaultWidth, true
       meter:Refresh()
+    ''')
+    ctx.run('''
+      -- window opacity is per window and must reach every visible chrome
+      -- layer through SetAlpha (backdrop-color alpha is not honored on all
+      -- clients)
+      local meter = Skada.UI:GetPrimary()
+      local opacity = meter.db.windowOpacity
+      assert(meter.frame.skadaBg and meter.frame.skadaBg.alpha == opacity,
+        "window fill does not follow window opacity")
+      assert(meter.headerTexture.alpha == 0.92 * opacity,
+        "header texture does not follow window opacity")
+      assert(meter.rows[1].background.alpha == 0.94 * opacity,
+        "row back does not follow window opacity")
+      meter.db.windowOpacity = 0
+      meter.layoutDirty = true
+      meter:Refresh()
+      assert(meter.frame.skadaBg.alpha == 0 and meter.headerTexture.alpha == 0,
+        "0% window opacity must leave no background")
+      meter.db.windowOpacity = 0.9
+      meter.layoutDirty = true
+      meter:Refresh()
+      assert(meter.frame.skadaBg.alpha == 0.9, "window opacity was not restored")
     ''')
     ctx.run('''
       local meter = Skada.UI:GetPrimary()
@@ -191,8 +215,32 @@ def run(ctx: Context):
       assert(resizeWindow.db.rows == 10, "unchanged window height gained a meter row")
     ''')
     ctx.run('''
-      -- Restored snap contract: choose one nearest window, copy its full
-      -- frame size, and place the dragged window against that target.
+      -- PersistGeometry must preserve an off-grid height exactly (snapSize
+      -- copies the neighbour's raw pixel height) so a later ApplyLayout
+      -- reproduces it instead of popping the window to a new size.
+      local Style = Skada.UIStyle
+      local gridFrame = {
+        GetWidth = function() return 240 end,
+        GetHeight = function() return 219.5 end,
+        SetHeight = function(self, value) self.height = value end,
+      }
+      local gridWindow = {
+        frame = gridFrame,
+        db = { barHeight = 18, barSpacing = 2, hideTitle = true },
+        manager = { SyncLegacy = function() end },
+      }
+      Skada.UISnapDock.PersistGeometry(gridWindow, false)
+      local expectedHeight = gridWindow.db.rows * (gridWindow.db.barHeight + gridWindow.db.barSpacing)
+        + Style.FOOTER_HEIGHT
+      assert(math.abs(expectedHeight - 219.5) < 0.01,
+        "persisted rows no longer reproduce the copied height: " ..
+        tostring(expectedHeight) .. " vs 219.5")
+      assert(gridWindow.db.rows ~= math.floor(gridWindow.db.rows),
+        "off-grid height was rounded down to whole rows")
+      assert(gridWindow.layoutDirty, "PersistGeometry did not mark the layout dirty")
+    ''')
+    ctx.run('''
+      -- Side-by-side dock: adopt the target's height, keep the width.
       local function fakeFrame(l, b, w, h)
         local f = {}
         f.left, f.bottom, f.width, f.height = l, b, w, h
@@ -218,10 +266,43 @@ def run(ctx: Context):
       }
       UIParent.width, UIParent.height = 1920, 1080
       Skada.UISnapDock.SnapWindow({ windows = { parent, window } }, window)
-      assert(frame.width == parentFrame.width and frame.height == parentFrame.height,
-        "nearest-target snap did not copy the target's full frame size")
+      assert(frame.width == 200 and frame.height == parentFrame.height,
+        "side-by-side snap did not adopt the target's height only")
       assert(frame.left == parentFrame.left + parentFrame.width,
         "nearest-target snap did not land against the target frame")
+      UIParent.width, UIParent.height = nil, nil
+    ''')
+    ctx.run('''
+      -- Stacked dock: adopt the target's width, keep the row count.
+      local function fakeFrame(l, b, w, h)
+        local f = {}
+        f.left, f.bottom, f.width, f.height = l, b, w, h
+        f.GetLeft = function() return f.left end
+        f.GetBottom = function() return f.bottom end
+        f.GetWidth = function() return f.width end
+        f.GetHeight = function() return f.height end
+        f.GetEffectiveScale = function() return 1 end
+        f.ClearAllPoints = function() end
+        f.SetWidth = function(self, value) f.width = value end
+        f.SetHeight = function(self, value) f.height = value end
+        f.SetPoint = function(self, point, _, relativePoint, x, y)
+          f.point, f.relativePoint, f.left, f.bottom = point, relativePoint, x, y
+        end
+        return f
+      end
+      local parentFrame = fakeFrame(100, 200, 240, 234)
+      local parent = { frame = parentFrame, db = { visible = true } }
+      local frame = fakeFrame(110, 442, 220, 106)
+      local window = {
+        frame = frame,
+        db = { snap = true, snapDistance = 12, snapGap = 0, snapSize = true },
+      }
+      UIParent.width, UIParent.height = 1920, 1080
+      Skada.UISnapDock.SnapWindow({ windows = { parent, window } }, window)
+      assert(frame.width == parentFrame.width and frame.height == 106,
+        "stacked snap did not adopt the target's width only")
+      assert(frame.bottom == parentFrame.bottom + parentFrame.height,
+        "stacked snap did not land against the target frame")
       UIParent.width, UIParent.height = nil, nil
     ''')
     ctx.run('''

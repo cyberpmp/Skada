@@ -29,12 +29,27 @@ Style.SURFACE_R, Style.SURFACE_G, Style.SURFACE_B = 0.045, 0.050, 0.064
 Style.ROW_R, Style.ROW_G, Style.ROW_B = 0.040, 0.044, 0.055
 Style.MUTED_R, Style.MUTED_G, Style.MUTED_B = 0.60, 0.63, 0.69
 Style.UI_ACCENT_R, Style.UI_ACCENT_G, Style.UI_ACCENT_B = 0.38, 0.61, 0.80
+-- Settings-window palette: pane interiors/borders and the gold accents used
+-- by the title medallion, live values, and selected tree rows.
+Style.PANE_BG_R, Style.PANE_BG_G, Style.PANE_BG_B, Style.PANE_BG_A = 0.1, 0.1, 0.1, 0.5
+Style.PANE_BORDER_R, Style.PANE_BORDER_G, Style.PANE_BORDER_B = 0.4, 0.4, 0.4
+Style.GOLD_R, Style.GOLD_G, Style.GOLD_B = 1, 0.82, 0
+Style.GOLD_BRIGHT_R, Style.GOLD_BRIGHT_G, Style.GOLD_BRIGHT_B = 1, 0.9, 0.2
 
 Style.FLAT_BACKDROP = {
   bgFile = Style.WHITE,
   edgeFile = Style.WHITE,
   tile = false,
   tileSize = 0,
+  edgeSize = 1,
+  insets = { left = -1, right = -1, top = -1, bottom = -1 },
+}
+
+-- Meter-window border only; the window fill is a dedicated texture so its
+-- opacity can ride on SetAlpha (backdrop-color alpha is not reliable on
+-- every client, and a near-opaque row background sits on top anyway).
+Style.WINDOW_BORDER_BACKDROP = {
+  edgeFile = Style.WHITE,
   edgeSize = 1,
   insets = { left = -1, right = -1, top = -1, bottom = -1 },
 }
@@ -136,7 +151,32 @@ function Style:ApplyShadow(frame, visible)
   end
 end
 
-function Style:ApplyMeterWindow(frame, active)
+-- The window backdrop alone is invisible in practice: every row paints its
+-- own dark texture over it, so the opacity setting has to reach that chrome
+-- too or the slider appears to do nothing. 0% makes the whole window
+-- background disappear and leaves only bars, text, and buttons. Per window.
+function Style:GetWindowOpacity(db)
+  local opacity = db and db.windowOpacity
+  if type(opacity) ~= "number" then return 0.9 end
+  return max(0, min(1, opacity))
+end
+
+-- The window fill as a plain texture: SetAlpha on it is the one transparency
+-- path every client honors, so the opacity slider always has a visible effect.
+function Style:ApplyWindowBackground(frame, opacity)
+  local bg = rawget(frame, "skadaBg")
+  if not bg then
+    bg = frame:CreateTexture(nil, "BACKGROUND")
+    bg:SetTexture(self.WHITE)
+    bg:SetAllPoints(frame)
+    rawset(frame, "skadaBg", bg)
+  end
+  bg:SetVertexColor(self.WINDOW_R, self.WINDOW_G, self.WINDOW_B)
+  bg:SetAlpha(opacity)
+  return bg
+end
+
+function Style:ApplyMeterWindow(frame, active, opacity)
   local profile = Skada.db.profile
   local hideBorder = profile.hideWindowBorder and true or false
   local borderR, borderG, borderB = 0.10, 0.11, 0.14
@@ -148,7 +188,9 @@ function Style:ApplyMeterWindow(frame, active)
       borderR, borderG, borderB = 0.28, 0.32, 0.40
     end
   end
-  self:ApplyFlatFrame(frame, profile.windowOpacity or 0.9, borderR, borderG, borderB)
+  frame:SetBackdrop(self.WINDOW_BORDER_BACKDROP)
+  frame:SetBackdropBorderColor(borderR, borderG, borderB, 1)
+  self:ApplyWindowBackground(frame, opacity or 0.9)
   if hideBorder then frame:SetBackdropBorderColor(0, 0, 0, 0) end
   self:ApplyShadow(frame, not hideBorder)
 end
@@ -164,12 +206,17 @@ function Style:ApplyHeader(window)
     local strength = active and 0.18 or 0.11
     r, g, b = r + ar * strength, g + ag * strength, b + ab * strength
   end
+  local opacity = self:GetWindowOpacity(window.db)
   window.headerTexture:SetTexture(self.WHITE)
-  window.headerTexture:SetVertexColor(r, g, b, 0.92)
+  -- carry transparency through SetAlpha: some clients ignore the alpha
+  -- argument of SetVertexColor, and the dedicated method always works
+  window.headerTexture:SetVertexColor(r, g, b)
+  window.headerTexture:SetAlpha(0.92 * opacity)
   if window.headerRule then
     local rr, rg, rb = 0.34, 0.38, 0.47
     if active and profile.classColorMenus then rr, rg, rb = self:GetAccentColor() end
-    window.headerRule:SetVertexColor(rr, rg, rb, active and 0.52 or 0.20)
+    window.headerRule:SetVertexColor(rr, rg, rb)
+    window.headerRule:SetAlpha((active and 0.52 or 0.20) * opacity)
   end
   if window.title then
     if active then

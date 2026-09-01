@@ -158,7 +158,7 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
     setUiFont(valueText, 12)
     -- Gold value, mirroring the standard options slider so the live number
     -- reads at a glance.
-    valueText:SetTextColor(1, 0.82, 0, 1)
+    valueText:SetTextColor(Style.GOLD_R, Style.GOLD_G, Style.GOLD_B, 1)
 
     local track = CreateFrame("Button", nil, row)
     track:RegisterForClicks("LeftButtonUp")

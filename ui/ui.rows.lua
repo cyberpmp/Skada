@@ -24,7 +24,9 @@ function Renderer:CreateRow(index)
   row.background = row:CreateTexture(nil, "BACKGROUND")
   row.background:SetAllPoints(row)
   row.background:SetTexture(Style:GetBarTexture())
-  row.background:SetVertexColor(Style.ROW_R, Style.ROW_G, Style.ROW_B, 0.94)
+  -- transparency rides on SetAlpha; see ApplyHeader
+  row.background:SetVertexColor(Style.ROW_R, Style.ROW_G, Style.ROW_B)
+  row.background:SetAlpha(0.94 * Style:GetWindowOpacity(self.db))
 
   row.bar = CreateFrame("StatusBar", nil, row)
   row.bar:SetAllPoints(row)
@@ -82,16 +84,10 @@ function Renderer:CreateRow(index)
   row:RegisterForDrag("LeftButton")
   row:SetScript("OnMouseDown", function() owner.windowWasDragged = false end)
   row:SetScript("OnDragStart", function()
-    if owner.db.locked then return end
-    owner.manager:SetActive(owner)
-    if owner.actionMenu then owner.actionMenu:Hide() end
-    owner.windowWasDragged = true
-    owner.frame:StartMoving()
+    owner:BeginWindowDrag("windowWasDragged")
   end)
   row:SetScript("OnDragStop", function()
-    owner.frame:StopMovingOrSizing()
-    owner.manager:SnapWindow(owner)
-    Skada.UISnapDock.PersistGeometry(owner, true)
+    owner:EndWindowDrag()
   end)
   row:SetScript("OnMouseWheel", function(_, delta)
     delta = getWheelDelta(delta)
@@ -123,7 +119,6 @@ function Renderer:ApplyLayout()
   local height = headerHeight + profile.rows * rowStep + Style.FOOTER_HEIGHT
   self.frame:SetWidth(profile.width)
   self.frame:SetHeight(height)
-  self.frame:SetScale(profile.scale)
   self.frame:ClearAllPoints()
   self.frame:SetPoint(profile.point, UIParent, profile.relativePoint, profile.x, profile.y)
   self.frame:SetMovable(not profile.locked)
@@ -166,7 +161,7 @@ function Renderer:ApplyLayout()
   end
 
   setReadableFont(self.title, 13)
-  Style:ApplyMeterWindow(self.frame, self.manager.visualActive == self)
+  Style:ApplyMeterWindow(self.frame, self.manager.visualActive == self, Style:GetWindowOpacity(profile))
   Style:ApplyHeader(self)
   if self.headerButtons then
     for i = 1, table_getn(self.headerButtons) do Style:ApplyButton(self.headerButtons[i]) end
@@ -202,6 +197,7 @@ function Renderer:PaintRows()
   local globalProfile = Skada.db.profile
   local customColor = globalProfile.classColors == false and globalProfile.barColor or nil
   local barTexture = Style:GetBarTexture()
+  local windowOpacity = Style:GetWindowOpacity(profile)
   local ease = Style:GetBarEase()
   local playerName = UnitName and UnitName("player") or nil
   local pinnedEntry, pinnedIndex = self:GetPinnedPlayerEntry(playerName, count)
@@ -219,11 +215,13 @@ function Renderer:PaintRows()
     row.entry = entry
     if entry then
       row:Show()
-      if row.lastBarTexture ~= barTexture then
+      if row.lastBarTexture ~= barTexture or row.lastOpacity ~= windowOpacity then
         row.lastBarTexture = barTexture
+        row.lastOpacity = windowOpacity
         row.bar:SetStatusBarTexture(barTexture)
         row.background:SetTexture(barTexture)
-        row.background:SetVertexColor(Style.ROW_R, Style.ROW_G, Style.ROW_B, 0.94)
+        row.background:SetVertexColor(Style.ROW_R, Style.ROW_G, Style.ROW_B)
+        row.background:SetAlpha(0.94 * windowOpacity)
       end
       if row.lastMax ~= maximum then
         row.lastMax = maximum

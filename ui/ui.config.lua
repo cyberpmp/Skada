@@ -7,7 +7,7 @@ local table_getn = table.getn
 
 WindowConfig.keys = {
   "visible", "locked", "width", "rows", "barHeight", "barSpacing",
-  "fontSize", "barAlpha", "scale", "mode", "segment", "point",
+  "fontSize", "barAlpha", "windowOpacity", "mode", "segment", "point",
   "relativePoint", "x", "y", "visualVersion", "autoSwitch", "snap",
   "snapDistance", "snapGap", "snapSize", "hideTitle", "combatMode",
   "returnAfterCombat", "nameIsCustom",
@@ -27,7 +27,7 @@ function WindowConfig.ApplyDefaults(target, source)
   if target.barSpacing == nil then target.barSpacing = 2 end
   target.fontSize = target.fontSize or 15
   target.barAlpha = target.barAlpha or 0.90
-  target.scale = target.scale or 1
+  target.windowOpacity = target.windowOpacity or 0.9
   target.mode = target.mode or "damage"
   target.segment = target.segment or "current"
   if Skada.Modes:Get(target.mode).live then target.segment = "current" end
@@ -40,7 +40,11 @@ function WindowConfig.ApplyDefaults(target, source)
   if target.snapDistance == nil then target.snapDistance = 12 end
   if target.snapGap == nil or target.snapGap == 4 then target.snapGap = 0 end
   if target.snapSize == nil then target.snapSize = true end
-  if target.hideTitle == nil then target.hideTitle = false end
+  if target.nameIsCustom == nil then
+    -- pre-upgrade windows carry no flag; a name that is not any mode's title
+    -- can only be a hand-set name and must survive mode switches
+    target.nameIsCustom = target.name ~= nil and not Skada.Modes:IsTitle(target.name)
+  end
   if target.combatMode == nil then target.combatMode = "" end
   if target.returnAfterCombat == nil then target.returnAfterCombat = false end
   if target.nameIsCustom == nil then target.nameIsCustom = false end
