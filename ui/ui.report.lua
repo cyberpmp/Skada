@@ -232,7 +232,14 @@ function Report:CreateActionMenu(owner, anchor)
     end
     self:Refresh()
     self:ClearAllPoints()
-    self:SetPoint("TOPRIGHT", self.anchor, "BOTTOMRIGHT", 0, -4)
+    local anchor = self.anchor
+    -- With the title bar hidden the gear button is gone; drop the menu from
+    -- the top-bar slot instead so it still reads as the window's menu bar.
+    local owner = self.owner
+    if owner and owner.header and not owner.header:IsShown() and owner.clickCatcher then
+      anchor = owner.clickCatcher
+    end
+    self:SetPoint("TOPRIGHT", anchor, "BOTTOMRIGHT", 0, -4)
     self:Show()
     Style:FadeIn(self, 0.45, 0.10, 1)
   end

@@ -1,4 +1,5 @@
 *.zip
+release-notes.md
 .review_diff.tmp
 
 .vscode/

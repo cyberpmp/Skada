@@ -9,15 +9,12 @@ local Style = Skada.UIStyle
 
 local max = math.max
 local min = math.min
-local string_upper = string.upper
 local table_getn = table.getn
 
-local attachTooltip = Skada.OptionsWidgets.AttachTooltip
-
-local VIEW_HEIGHT = 440
+local VIEW_HEIGHT = 424
 local CONTENT_WIDTH = 400
 local TREE_WIDTH = 175
-local NODE_HEIGHT = 24
+local NODE_HEIGHT = 18
 
 local PAGE_DESCRIPTIONS = {
   general = "Core behavior and everyday conveniences.",
@@ -25,8 +22,26 @@ local PAGE_DESCRIPTIONS = {
   window = "Appearance, navigation, and behavior for this window.",
 }
 
-local FRAME_BACKDROP = Style.FLAT_BACKDROP
-local PANE_BACKDROP = Style.FLAT_BACKDROP
+-- Window chrome mirrors the Ace3 dialog look used by Skada-Cata's options
+-- window: standard dialog frame, stone title medallion, status bar, and
+-- tooltip-bordered panes.
+local FRAME_BACKDROP = {
+  bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+  edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+  tile = true, tileSize = 32, edgeSize = 32,
+  insets = { left = 8, right = 8, top = 8, bottom = 8 },
+}
+local PANE_BACKDROP = {
+  bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+  edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+  tile = true, tileSize = 16, edgeSize = 16,
+  insets = { left = 3, right = 3, top = 5, bottom = 3 },
+}
+local TITLE_TEXTURE = "Interface\\DialogFrame\\UI-DialogBox-Header"
+local HIGHLIGHT_TEXTURE = "Interface\\QuestFrame\\UI-QuestTitleHighlight"
+local PLUS_TEXTURE = "Interface\\Buttons\\UI-PlusButton-Up"
+local MINUS_TEXTURE = "Interface\\Buttons\\UI-MinusButton-Up"
+local GOLD_R, GOLD_G, GOLD_B = 1, 0.82, 0
 
 local UI_FONT = "Fonts\\FRIZQT__.TTF"
 if GameFontNormal and GameFontNormal.GetFont then
@@ -44,8 +59,7 @@ function Shell.Build(owner)
   frame:SetHeight(500)
   frame:SetFrameStrata("MEDIUM")
   frame:SetBackdrop(FRAME_BACKDROP)
-  frame:SetBackdropColor(0.026, 0.029, 0.037, 0.99)
-  frame:SetBackdropBorderColor(0.095, 0.105, 0.13, 1)
+  frame:SetBackdropColor(0, 0, 0, 1)
   frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
   frame:SetClampedToScreen(true)
   frame:SetToplevel(true)
@@ -54,74 +68,83 @@ function Shell.Build(owner)
   frame:RegisterForDrag("LeftButton")
   frame:SetScript("OnDragStart", function() frame:StartMoving() end)
   frame:SetScript("OnDragStop", function() frame:StopMovingOrSizing() end)
-  Style:ApplyShadow(frame, true)
   if UISpecialFrames then
     UISpecialFrames[table_getn(UISpecialFrames) + 1] = "SkadaSettingsFrame"
   end
 
-  local titleBar = CreateFrame("Frame", nil, frame)
-  titleBar:SetWidth(570)
-  titleBar:SetHeight(28)
-  titleBar:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -6)
+  local titlebg = frame:CreateTexture(nil, "OVERLAY")
+  titlebg:SetTexture(TITLE_TEXTURE)
+  titlebg:SetWidth(100)
+  titlebg:SetHeight(40)
+  titlebg:SetPoint("TOP", frame, "TOP", 0, 12)
+  titlebg:SetTexCoord(0.31, 0.67, 0, 0.63)
 
-  local title = titleBar:CreateFontString(nil, "OVERLAY")
-  title:SetPoint("LEFT", titleBar, "LEFT", 0, 1)
-  setUiFont(title, 14)
-  title:SetText("SKADA")
-  title:SetTextColor(0.92, 0.93, 0.96, 1)
+  local titlebgLeft = frame:CreateTexture(nil, "OVERLAY")
+  titlebgLeft:SetTexture(TITLE_TEXTURE)
+  titlebgLeft:SetWidth(30)
+  titlebgLeft:SetHeight(40)
+  titlebgLeft:SetPoint("TOPRIGHT", titlebg, "TOPLEFT", 0, 0)
+  titlebgLeft:SetTexCoord(0.21, 0.31, 0, 0.63)
 
-  local subtitle = titleBar:CreateFontString(nil, "OVERLAY")
-  subtitle:SetPoint("LEFT", title, "RIGHT", 9, 0)
-  setUiFont(subtitle, 11)
-  subtitle:SetText("Meter settings")
-  subtitle:SetTextColor(Style.MUTED_R, Style.MUTED_G, Style.MUTED_B, 1)
+  local titlebgRight = frame:CreateTexture(nil, "OVERLAY")
+  titlebgRight:SetTexture(TITLE_TEXTURE)
+  titlebgRight:SetWidth(30)
+  titlebgRight:SetHeight(40)
+  titlebgRight:SetPoint("TOPLEFT", titlebg, "TOPRIGHT", 0, 0)
+  titlebgRight:SetTexCoord(0.67, 0.77, 0, 0.63)
 
-  local headerRule = frame:CreateTexture(nil, "ARTWORK")
-  headerRule:SetTexture(Style.WHITE)
-  headerRule:SetVertexColor(0.18, 0.20, 0.25, 0.48)
-  headerRule:SetHeight(1)
-  headerRule:SetPoint("TOPLEFT", frame, "TOPLEFT", 14, -38)
-  headerRule:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -14, -38)
+  local title = frame:CreateFontString(nil, "OVERLAY")
+  title:SetPoint("TOP", titlebg, "TOP", 0, -14)
+  setUiFont(title, 12)
+  title:SetText("Skada")
+  title:SetTextColor(GOLD_R, GOLD_G, GOLD_B, 1)
 
-  local close = CreateFrame("Button", nil, frame)
-  close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -8)
-  close:SetWidth(18)
-  close:SetHeight(18)
-  Style:ApplyButton(close)
-  close.text = close:CreateFontString(nil, "OVERLAY")
-  close.text:SetAllPoints(close)
-  setUiFont(close.text, 13)
-  close.text:SetText("X")
-  close.text:SetTextColor(0.72, 0.74, 0.79, 1)
-  close:SetScript("OnClick", function() frame:Hide() end)
-  attachTooltip(close, "Close", "Hide the settings window. Changes apply immediately.")
+  local status = CreateFrame("Frame", nil, frame)
+  status:SetHeight(24)
+  status:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 15, 15)
+  status:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -137, 15)
+  status:SetBackdrop(PANE_BACKDROP)
+  status:SetBackdropColor(0.1, 0.1, 0.1, 1)
+  status:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
+  local statusText = status:CreateFontString(nil, "OVERLAY")
+  statusText:SetPoint("LEFT", status, "LEFT", 7, 0)
+  statusText:SetPoint("RIGHT", status, "RIGHT", -7, 0)
+  statusText:SetJustifyH("LEFT")
+  setUiFont(statusText, 11)
+  statusText:SetText("Meter settings")
+  statusText:SetTextColor(GOLD_R, GOLD_G, GOLD_B, 1)
+
+  local close = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+  close:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -27, 17)
+  close:SetWidth(100)
+  close:SetHeight(20)
+  close:SetText(CLOSE or "Close")
+  close:SetScript("OnClick", function()
+    if PlaySound then PlaySound("gsTitleOptionExit") end
+    frame:Hide()
+  end)
 
   frame:SetScript("OnHide", function()
     if CloseDropDownMenus then CloseDropDownMenus() end
+    -- closing the settings must not leave the last-edited window looking picked
+    if Skada.UI and Skada.UI.ClearSelectionVisual then Skada.UI:ClearSelectionVisual() end
   end)
 
   local treePanel = CreateFrame("Frame", nil, frame)
   treePanel:SetWidth(TREE_WIDTH)
   treePanel:SetHeight(VIEW_HEIGHT)
-  treePanel:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -46)
+  treePanel:SetPoint("TOPLEFT", frame, "TOPLEFT", 17, -36)
   treePanel:SetBackdrop(PANE_BACKDROP)
-  treePanel:SetBackdropColor(0.026, 0.029, 0.037, 0)
-  treePanel:SetBackdropBorderColor(0, 0, 0, 0)
-
-  local navRule = frame:CreateTexture(nil, "ARTWORK")
-  navRule:SetTexture(Style.WHITE)
-  navRule:SetVertexColor(0.18, 0.20, 0.25, 0.38)
-  navRule:SetWidth(1)
-  navRule:SetPoint("TOPLEFT", treePanel, "TOPRIGHT", 4, 0)
-  navRule:SetPoint("BOTTOMLEFT", treePanel, "BOTTOMRIGHT", 4, 0)
+  treePanel:SetBackdropColor(0.1, 0.1, 0.1, 0.5)
+  treePanel:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
 
   local viewport = CreateFrame("Frame", nil, frame)
   viewport:SetWidth(CONTENT_WIDTH)
   viewport:SetHeight(VIEW_HEIGHT)
-  viewport:SetPoint("TOPLEFT", frame, "TOPLEFT", 12 + TREE_WIDTH + 9, -46)
+  viewport:SetPoint("TOPLEFT", frame, "TOPLEFT", 17 + TREE_WIDTH + 12, -36)
   viewport:SetBackdrop(PANE_BACKDROP)
-  viewport:SetBackdropColor(0.022, 0.025, 0.033, 0)
-  viewport:SetBackdropBorderColor(0, 0, 0, 0)
+  viewport:SetBackdropColor(0.1, 0.1, 0.1, 0.5)
+  viewport:SetBackdropBorderColor(0.4, 0.4, 0.4, 1)
   viewport:EnableMouseWheel(true)
   viewport:SetScript("OnMouseWheel", function(_, delta)
     delta = getWheelDelta(delta)
@@ -136,9 +159,7 @@ function Shell.Build(owner)
 
   owner.frame = frame
   owner.title = title
-  owner.subtitle = subtitle
-  owner.headerRule = headerRule
-  owner.navRule = navRule
+  owner.statusText = statusText
   owner.treePanel = treePanel
   owner.viewport = viewport
   owner.scrollbar = scrollbar
@@ -182,37 +203,29 @@ function Shell.AcquireNodeRow(owner, index)
     local row = CreateFrame("Button", nil, owner.treePanel)
     row:RegisterForClicks("LeftButtonUp")
     row:SetWidth(TREE_WIDTH - 12)
-    row:SetHeight(NODE_HEIGHT - 2)
+    row:SetHeight(NODE_HEIGHT)
     row:SetFrameLevel(owner.treePanel:GetFrameLevel() + 1)
 
     row.highlight = row:CreateTexture(nil, "BACKGROUND")
-    row.highlight:SetTexture(Style.WHITE)
-    local r, g, b = Style.UI_ACCENT_R, Style.UI_ACCENT_G, Style.UI_ACCENT_B
-    row.highlight:SetVertexColor(r, g, b, 0.13)
-    row.highlight:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
-    row.highlight:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)
-
-    row.marker = row:CreateTexture(nil, "ARTWORK")
-    row.marker:SetTexture(Style.WHITE)
-    row.marker:SetVertexColor(r, g, b, 0.95)
-    row.marker:SetWidth(2)
-    row.marker:SetPoint("TOPLEFT", row, "TOPLEFT", 2, -3)
-    row.marker:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 2, 3)
-    row.marker:Hide()
+    row.highlight:SetTexture(HIGHLIGHT_TEXTURE)
+    row.highlight:SetBlendMode("ADD")
+    row.highlight:SetAlpha(0.5)
+    row.highlight:SetAllPoints(row)
 
     row.hover = row:CreateTexture(nil, "BACKGROUND")
-    row.hover:SetTexture(Style.WHITE)
-    row.hover:SetVertexColor(1, 1, 1, 0.045)
-    row.hover:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -1)
-    row.hover:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -1, 1)
+    row.hover:SetTexture(HIGHLIGHT_TEXTURE)
+    row.hover:SetBlendMode("ADD")
+    row.hover:SetAlpha(0.25)
+    row.hover:SetAllPoints(row)
     row.hover:Hide()
 
     row.toggle = CreateFrame("Button", nil, row)
-    row.toggle:SetWidth(12)
-    row.toggle:SetHeight(12)
-    row.toggle.text = row.toggle:CreateFontString(nil, "OVERLAY")
-    row.toggle.text:SetAllPoints(row.toggle)
-    setUiFont(row.toggle.text, 12)
+    row.toggle:SetWidth(14)
+    row.toggle:SetHeight(14)
+    row.toggle:SetScript("OnClick", function()
+      owner.expandedWindows = not owner.expandedWindows
+      Shell.RebuildTree(owner)
+    end)
 
     row.label = row:CreateFontString(nil, "OVERLAY")
     row.label:SetJustifyH("LEFT")
@@ -242,23 +255,19 @@ function Shell.RebuildTree(owner)
     local hasToggle = node.children and true or false
     if hasToggle then
       row.toggle:SetPoint("LEFT", row, "LEFT", indent - 2, 0)
-      row.toggle.text:SetText(owner.expandedWindows and "-" or "+")
-      row.toggle:SetScript("OnClick", function()
-        owner.expandedWindows = not owner.expandedWindows
-        Shell.RebuildTree(owner)
-      end)
+      row.toggle:SetNormalTexture(owner.expandedWindows and MINUS_TEXTURE or PLUS_TEXTURE)
       row.toggle:Show()
     else
       row.toggle:Hide()
     end
 
     row.label:ClearAllPoints()
-    row.label:SetPoint("LEFT", row, "LEFT", indent + (hasToggle and 14 or 0), 0)
+    row.label:SetPoint("LEFT", row, "LEFT", indent + (hasToggle and 16 or 0), 0)
     if node.depth == 0 then
-      setUiFont(row.label, 10)
-      row.label:SetText(string_upper(node.label))
-    else
       setUiFont(row.label, 12)
+      row.label:SetText(node.label)
+    else
+      setUiFont(row.label, 11)
       row.label:SetText(node.label)
     end
     row:SetScript("OnClick", function()
@@ -289,18 +298,16 @@ function Shell.UpdateTreeSelection(owner)
       and (not node.window or node.window == owner.selectedWindow)
     if selected then
       row.highlight:Show()
-      row.marker:Show()
       row.hover:Hide()
       row.skadaSelected = true
-      row.label:SetTextColor(0.96, 0.97, 1, 1)
+      row.label:SetTextColor(1, 0.9, 0.2, 1)
     else
       row.highlight:Hide()
-      row.marker:Hide()
       row.skadaSelected = false
       if type(node) == "table" and node.depth == 0 then
-        row.label:SetTextColor(0.80, 0.82, 0.87, 1)
+        row.label:SetTextColor(GOLD_R, GOLD_G, GOLD_B, 1)
       else
-        row.label:SetTextColor(0.62, 0.65, 0.71, 1)
+        row.label:SetTextColor(0.92, 0.92, 0.92, 1)
       end
     end
   end
@@ -459,6 +466,9 @@ function Shell.ShowPage(owner, pageKey)
   if page.strip then page.strip:Show() end
 
   page.content:Show()
+  if owner.statusText then
+    owner.statusText:SetText(PAGE_DESCRIPTIONS[pageKey] or "Skada settings.")
+  end
   if page.strip then
     Shell.SelectTab(owner, page, owner.uiTabs[pageKey] or page.firstTab)
   else
@@ -484,8 +494,12 @@ function Shell.ApplyScroll(owner, offset)
 
   page.content:SetPoint("TOPLEFT", owner.viewport, "TOPLEFT", 0, owner.scrollOffset - headerPad)
 
-  local viewTop = owner.scrollOffset - headerPad
-  local viewBottom = viewTop + VIEW_HEIGHT
+  -- The visible band is the pane minus the title/description header: a row is
+  -- shown only while it sits fully between the content area's top edge (at
+  -- scrollOffset in content coordinates) and the pane bottom, so scrolled rows
+  -- slide away beneath the page header instead of drawing over it.
+  local viewTop = owner.scrollOffset
+  local viewBottom = viewTop + viewHeight
   local i, row
   for i = 1, table_getn(page.rows) do
     row = page.rows[i]

@@ -36,6 +36,9 @@ saved-fight segments.
 
 - Multiple windows with independent modes, segments, positions, dimensions,
   visibility, locking, automatic segment switching, and snapping.
+- Optional per-window combat mode switching (for example Threat in combat,
+  Damage done out of combat) and a hideable title bar that collapses the
+  window to its bars.
 - Smooth bars, class colors and icons, spell colors, custom textures and fonts,
   configurable row borders, and self highlighting.
 - A native settings panel and draggable minimap button; no Ace or display
@@ -58,11 +61,14 @@ saved-fight segments.
 - Right-click a row or the window header to go back through detail, mode, and
   fight views.
 - Left-click the header to move forward through fight, mode, and meter views.
+  With "Hide title bar" enabled, the top bar slot takes over that navigation
+  and drag-to-move behavior, even when no bar is displayed.
 - Click the lightning icon to open the mode list.
 - Click `A` to toggle automatic segments: Current while in combat and Overall
   when out of combat.
 - Use the mouse wheel to scroll non-threat views.
-- Drag the header or lower-right resize grip while the window is unlocked.
+- Drag the header, any bar, the window background, or the lower-right resize
+  grip while the window is unlocked.
 
 The gear button opens window actions for settings, combat logging, reporting,
 creating or removing windows, and resetting fight data. Dragged windows can
@@ -179,8 +185,9 @@ compatibility targets the OctoWoW 1.12.1 API specifically.
 
 ## Releasing
 
-Releases are tag-driven. Update `## Version:` in `Skada.toc`, commit the
-change, and create a matching semantic-version tag:
+Releases are tag-driven. Update `## Version:` in `Skada.toc`, move the entries
+from `## Unreleased` into a matching `## VERSION - YYYY-MM-DD` changelog
+section, commit the change, and create a matching semantic-version tag:
 
 ```shell
 git tag v1.0.0
@@ -191,7 +198,10 @@ The release workflow runs the test suite first — a failing suite blocks the
 release — verifies that the tag matches the TOC version, and then creates
 an install-ready `Skada/` package containing only the runtime, media, TOC, and
 consolidated license notices. Repository and development documentation remain
-outside the user-facing zip.
+outside the user-facing zip. The GitHub release description is extracted from
+the matching `CHANGELOG.md` version section. If that heading has not been
+created, the workflow falls back to `## Unreleased`; a missing or empty section
+blocks the release instead of publishing an empty description.
 
 ## License
 

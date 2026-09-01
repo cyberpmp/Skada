@@ -9,7 +9,8 @@ WindowConfig.keys = {
   "visible", "locked", "width", "rows", "barHeight", "barSpacing",
   "fontSize", "barAlpha", "scale", "mode", "segment", "point",
   "relativePoint", "x", "y", "visualVersion", "autoSwitch", "snap",
-  "snapDistance", "snapGap", "snapSize",
+  "snapDistance", "snapGap", "snapSize", "hideTitle", "combatMode",
+  "returnAfterCombat", "nameIsCustom",
 }
 
 function WindowConfig.ApplyDefaults(target, source)
@@ -39,6 +40,10 @@ function WindowConfig.ApplyDefaults(target, source)
   if target.snapDistance == nil then target.snapDistance = 12 end
   if target.snapGap == nil or target.snapGap == 4 then target.snapGap = 0 end
   if target.snapSize == nil then target.snapSize = true end
+  if target.hideTitle == nil then target.hideTitle = false end
+  if target.combatMode == nil then target.combatMode = "" end
+  if target.returnAfterCombat == nil then target.returnAfterCombat = false end
+  if target.nameIsCustom == nil then target.nameIsCustom = false end
 end
 
 function WindowConfig.SyncLegacy(manager, window)

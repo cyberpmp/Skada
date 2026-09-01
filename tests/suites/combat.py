@@ -107,10 +107,11 @@ def run(ctx: Context):
       assert(GameTooltip.captured["Overhealing (estimated)"] == "500")
       local healingMode = Skada.Modes:Get("healing")
       assert(Skada.Modes:GetActorValue(healingMode, Skada.Data.current.actors.Bob) == 400)
-      assert(Skada.Modes:GetActorText(healingMode, Skada.Data.current.actors.Bob, Skada.Data.current) == "400")
+      assert(Skada.Modes:GetActorText(healingMode, Skada.Data.current.actors.Bob, Skada.Data.current)
+        == "400 (400, 100.0%)")
       assert(Skada.Modes:GetDetailText(healingMode,
         Skada.Data.current.actors.Bob.healingSpells["Greater Heal"],
-        Skada.Data.current.actors.Bob, Skada.Data.current) == "400")
+        Skada.Data.current.actors.Bob, Skada.Data.current) == "400 (100.0%)")
       assert(Skada.Modes:GetSetTitle(healingMode, Skada.Data.current) == "400")
       assert(Skada.Modes:GetActorValue(Skada.Modes:Get("overhealing"), Skada.Data.current.actors.Bob) == 500)
 
@@ -119,7 +120,7 @@ def run(ctx: Context):
       meter:Refresh()
       assert(meter.display[1].label == "Bob" and meter.display[1].value == 400)
       assert(meter.paintMaximum == 400)
-      assert(meter.rows[1].right.textValue == "400")
+      assert(meter.rows[1].right.textValue == "400 (400, 100.0%)")
       assert(not rawget(meter.rows[1], "totalBar"), "standard healing created an overheal bar")
       meter.db.mode = "damage"
       meter:Refresh()

@@ -84,6 +84,73 @@ def run(ctx: Context):
       meter:Refresh()
     ''')
     ctx.run('''
+      local meter = Skada.UI:GetPrimary()
+      local Style = Skada.UIStyle
+      local rowStep = meter.db.barHeight + meter.db.barSpacing
+      local fullHeight = Style.HEADER_HEIGHT + meter.db.rows * rowStep + Style.FOOTER_HEIGHT
+      assert(meter.frame.height == fullHeight, "window height does not include the header")
+      assert(meter.header:IsShown() and not meter.clickCatcher:IsShown(),
+        "catcher must be hidden while the title bar is shown")
+
+      meter.db.hideTitle, meter.layoutDirty = true, true
+      meter:Refresh()
+      local collapsedHeight = meter.db.rows * rowStep + Style.FOOTER_HEIGHT
+      assert(not meter.header:IsShown(), "hide-title did not hide the header")
+      assert(meter.frame.height == collapsedHeight,
+        "hide-title did not drop the header from the window height")
+      assert(meter.rows[1].lastPointY == 0, "row 1 was not re-anchored to the window top")
+      assert(meter.clickCatcher:IsShown(), "hide-title did not show the click catcher")
+      assert(meter.clickCatcher.height == meter.db.barHeight,
+        "click catcher height does not match the top-bar slot")
+      assert(meter.clickCatcher.lastPointY == 0, "click catcher is not in the top-bar slot")
+
+      -- with the title bar hidden the top-bar slot is the window's menu bar
+      local menu = meter.actionMenu
+      local viewBefore = meter.view
+      assert(not menu:IsShown())
+      meter.clickCatcher.OnClick(meter.clickCatcher, "RightButton")
+      assert(menu:IsShown(), "catcher right-click did not open the window menu")
+      assert(menu.lastRelativeTo == meter.clickCatcher,
+        "hidden-title menu did not anchor to the top-bar slot")
+      meter.clickCatcher.OnClick(meter.clickCatcher, "RightButton")
+      assert(not menu:IsShown(), "catcher right-click did not close the window menu")
+      meter:Back()
+      meter.clickCatcher.OnClick(meter.clickCatcher, "LeftButton")
+      assert(meter.view == viewBefore, "catcher left-click did not navigate forward")
+
+      meter.db.hideTitle, meter.layoutDirty = false, true
+      meter:Refresh()
+      assert(meter.header:IsShown() and not meter.clickCatcher:IsShown())
+      assert(meter.frame.height == fullHeight, "window height was not restored with the header")
+      assert(meter.rows[1].lastPointY == -Style.HEADER_HEIGHT,
+        "row 1 was not re-anchored below the restored header")
+    ''')
+    ctx.run('''
+      local meter = Skada.UI:GetPrimary()
+      local row = meter.rows[1]
+      meter.view, meter.detailActor = "mode", nil
+
+      -- dragging from a row moves the window instead of drilling into details
+      row.OnMouseDown(row)
+      assert(not meter.windowWasDragged)
+      row.OnDragStart(row)
+      assert(meter.windowWasDragged, "row drag start did not mark the window as dragged")
+      row.OnClick(row, "LeftButton")
+      assert(not meter.windowWasDragged and meter.detailActor == nil,
+        "row click after a drag must not open the detail view")
+
+      -- a plain row click still drills down
+      row.entry = { actor = { name = "DragProbe" } }
+      row.OnClick(row, "LeftButton")
+      assert(meter.detailActor == "DragProbe", "plain row click lost its drill-down")
+      meter.detailActor, row.entry = nil, nil
+
+      -- dragging from the window background moves the window as well
+      meter.frame.OnDragStart(meter.frame)
+      assert(meter.headerWasDragged, "frame drag start did not mark the window as dragged")
+      meter.headerWasDragged = nil
+    ''')
+    ctx.run('''
       local frame = {
         GetLeft = function() return 400 end,
         GetBottom = function() return 4 end,
@@ -122,6 +189,40 @@ def run(ctx: Context):
       }
       Skada.UISnapDock.PersistGeometry(resizeWindow, false)
       assert(resizeWindow.db.rows == 10, "unchanged window height gained a meter row")
+    ''')
+    ctx.run('''
+      -- Restored snap contract: choose one nearest window, copy its full
+      -- frame size, and place the dragged window against that target.
+      local function fakeFrame(l, b, w, h)
+        local f = {}
+        f.left, f.bottom, f.width, f.height = l, b, w, h
+        f.GetLeft = function() return f.left end
+        f.GetBottom = function() return f.bottom end
+        f.GetWidth = function() return f.width end
+        f.GetHeight = function() return f.height end
+        f.GetEffectiveScale = function() return 1 end
+        f.ClearAllPoints = function() end
+        f.SetWidth = function(self, value) f.width = value end
+        f.SetHeight = function(self, value) f.height = value end
+        f.SetPoint = function(self, point, _, relativePoint, x, y)
+          f.point, f.relativePoint, f.left, f.bottom = point, relativePoint, x, y
+        end
+        return f
+      end
+      local parentFrame = fakeFrame(100, 200, 240, 234)
+      local parent = { frame = parentFrame, db = { visible = true } }
+      local frame = fakeFrame(344, 208, 200, 106)
+      local window = {
+        frame = frame,
+        db = { snap = true, snapDistance = 12, snapGap = 0, snapSize = true },
+      }
+      UIParent.width, UIParent.height = 1920, 1080
+      Skada.UISnapDock.SnapWindow({ windows = { parent, window } }, window)
+      assert(frame.width == parentFrame.width and frame.height == parentFrame.height,
+        "nearest-target snap did not copy the target's full frame size")
+      assert(frame.left == parentFrame.left + parentFrame.width,
+        "nearest-target snap did not land against the target frame")
+      UIParent.width, UIParent.height = nil, nil
     ''')
     ctx.run('''
       Skada.UI:ShowReportPopup(Skada.UI:GetPrimary())

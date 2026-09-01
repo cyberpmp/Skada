@@ -71,7 +71,6 @@ function SnapDock.SnapWindow(manager, window)
           local candidateLeft, candidateBottom
           if axisDistance >= 0 then
             candidateLeft = centerX < parentCenterX and (oLeft - gap - width) or (oRight + gap)
-
             candidateBottom = oTop - height
           else
             candidateLeft = oLeft
@@ -124,11 +123,10 @@ function SnapDock.SnapWindow(manager, window)
       if type(pScale) ~= "number" or pScale <= 0 then pScale = 1 end
       local parentWidth = bestParent.frame:GetWidth() * pScale
       local parentHeight = bestParent.frame:GetHeight() * pScale
-      if parentWidth and parentHeight and (math.abs(parentWidth - width) > 0.5 or math.abs(parentHeight - height) > 0.5) then
-
+      if parentWidth and parentHeight and
+          (math.abs(parentWidth - width) > 0.5 or math.abs(parentHeight - height) > 0.5) then
         window.frame:SetWidth(parentWidth / scale)
         window.frame:SetHeight(parentHeight / scale)
-
         return SnapDock.SnapWindow(manager, window)
       end
     end
@@ -146,7 +144,8 @@ function SnapDock.PersistGeometry(window, persistPoint)
   local frame = window.frame
   profile.width = max(Style.MIN_WINDOW_WIDTH, floor(frame:GetWidth() + 0.5))
   local rowStep = profile.barHeight + profile.barSpacing
-  local contentHeight = frame:GetHeight() - Style.HEADER_HEIGHT - Style.FOOTER_HEIGHT
+  local headerHeight = profile.hideTitle and 0 or Style.HEADER_HEIGHT
+  local contentHeight = frame:GetHeight() - headerHeight - Style.FOOTER_HEIGHT
   profile.rows = min(30, max(3, floor(contentHeight / rowStep + 0.5)))
   window.layoutDirty = true
   if persistPoint then

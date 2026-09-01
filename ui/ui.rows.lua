@@ -73,7 +73,25 @@ function Renderer:CreateRow(index)
   row:SetScript("OnClick", function(self, button)
     button = getClickButton(button)
     owner.manager:SetActive(owner)
+    if owner.windowWasDragged then
+      owner.windowWasDragged = false
+      return
+    end
     if button == "RightButton" then owner:Back() else owner:SelectEntry(self.entry) end
+  end)
+  row:RegisterForDrag("LeftButton")
+  row:SetScript("OnMouseDown", function() owner.windowWasDragged = false end)
+  row:SetScript("OnDragStart", function()
+    if owner.db.locked then return end
+    owner.manager:SetActive(owner)
+    if owner.actionMenu then owner.actionMenu:Hide() end
+    owner.windowWasDragged = true
+    owner.frame:StartMoving()
+  end)
+  row:SetScript("OnDragStop", function()
+    owner.frame:StopMovingOrSizing()
+    owner.manager:SnapWindow(owner)
+    Skada.UISnapDock.PersistGeometry(owner, true)
   end)
   row:SetScript("OnMouseWheel", function(_, delta)
     delta = getWheelDelta(delta)
@@ -101,7 +119,8 @@ function Renderer:ApplyLayout()
   local profile = self.db
   profile.width = max(Style.MIN_WINDOW_WIDTH, profile.width or Style.MIN_WINDOW_WIDTH)
   local rowStep = profile.barHeight + profile.barSpacing
-  local height = Style.HEADER_HEIGHT + profile.rows * rowStep + Style.FOOTER_HEIGHT
+  local headerHeight = profile.hideTitle and 0 or Style.HEADER_HEIGHT
+  local height = headerHeight + profile.rows * rowStep + Style.FOOTER_HEIGHT
   self.frame:SetWidth(profile.width)
   self.frame:SetHeight(height)
   self.frame:SetScale(profile.scale)
@@ -109,18 +128,35 @@ function Renderer:ApplyLayout()
   self.frame:SetPoint(profile.point, UIParent, profile.relativePoint, profile.x, profile.y)
   self.frame:SetMovable(not profile.locked)
   self.frame:SetResizable(not profile.locked)
-  self.frame:SetMinResize(Style.MIN_WINDOW_WIDTH, Style.HEADER_HEIGHT + 3 * rowStep + Style.FOOTER_HEIGHT)
-  self.frame:SetMaxResize(600, Style.HEADER_HEIGHT + 30 * rowStep + Style.FOOTER_HEIGHT)
+  self.frame:SetMinResize(Style.MIN_WINDOW_WIDTH, headerHeight + 3 * rowStep + Style.FOOTER_HEIGHT)
+  self.frame:SetMaxResize(600, headerHeight + 30 * rowStep + Style.FOOTER_HEIGHT)
   self.frame:EnableMouse(true)
   self.frame:SetClampedToScreen(true)
+
+  if profile.hideTitle then
+    self.header:Hide()
+  else
+    self.header:Show()
+  end
+  if self.clickCatcher then
+    self.clickCatcher:ClearAllPoints()
+    if profile.hideTitle then
+      self.clickCatcher:SetPoint("TOPLEFT", self.frame, "TOPLEFT", Style.WINDOW_PADDING, 0)
+      self.clickCatcher:SetPoint("TOPRIGHT", self.frame, "TOPRIGHT", -Style.WINDOW_PADDING, 0)
+      self.clickCatcher:SetHeight(profile.barHeight)
+      self.clickCatcher:Show()
+    else
+      self.clickCatcher:Hide()
+    end
+  end
 
   self:EnsureRows(profile.rows)
   local i, row
   for i = 1, table_getn(self.rows) do
     row = self.rows[i]
     row:ClearAllPoints()
-    row:SetPoint("TOPLEFT", self.frame, "TOPLEFT", Style.WINDOW_PADDING, -Style.HEADER_HEIGHT - (i - 1) * rowStep)
-    row:SetPoint("TOPRIGHT", self.frame, "TOPRIGHT", -Style.WINDOW_PADDING, -Style.HEADER_HEIGHT - (i - 1) * rowStep)
+    row:SetPoint("TOPLEFT", self.frame, "TOPLEFT", Style.WINDOW_PADDING, -headerHeight - (i - 1) * rowStep)
+    row:SetPoint("TOPRIGHT", self.frame, "TOPRIGHT", -Style.WINDOW_PADDING, -headerHeight - (i - 1) * rowStep)
     row:SetHeight(profile.barHeight)
     row.icon:SetWidth(max(10, profile.barHeight - 4))
     row.icon:SetHeight(max(10, profile.barHeight - 4))
@@ -130,7 +166,7 @@ function Renderer:ApplyLayout()
   end
 
   setReadableFont(self.title, 13)
-  Style:ApplyMeterWindow(self.frame, self.manager:GetActive() == self)
+  Style:ApplyMeterWindow(self.frame, self.manager.visualActive == self)
   Style:ApplyHeader(self)
   if self.headerButtons then
     for i = 1, table_getn(self.headerButtons) do Style:ApplyButton(self.headerButtons[i]) end

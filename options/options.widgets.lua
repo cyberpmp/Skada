@@ -230,23 +230,24 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
     row:SetScript("OnMouseDown", startDrag)
     row:SetScript("OnMouseUp", stopDrag)
 
-    if IsMouseButtonDown and track.IsMouseOver then
-      local buttonWasDown = false
-      row:SetScript("OnUpdate", function()
-        local down = IsMouseButtonDown("LeftButton") and true or false
-        if dragging then
-          if down and track:IsMouseOver() then
-            setFromCursor()
-          elseif not down then
-            dragging = false
-          end
-        elseif down and not buttonWasDown and track:IsMouseOver() then
-          dragging = true
+    local buttonWasDown = false
+    row:SetScript("OnUpdate", function()
+      if not IsMouseButtonDown or not row.IsMouseOver then return end
+      local down = IsMouseButtonDown("LeftButton") and true or false
+      if dragging then
+        -- once the drag starts it follows the cursor anywhere, so the value
+        -- keeps updating when the cursor strays off the thin track
+        if down then
           setFromCursor()
+        else
+          dragging = false
         end
-        buttonWasDown = down
-      end)
-    end
+      elseif down and not buttonWasDown and row:IsMouseOver() then
+        dragging = true
+        setFromCursor()
+      end
+      buttonWasDown = down
+    end)
 
     track:SetScript("OnClick", function() setFromCursor() end)
     OptionsWidgets.AttachTooltip(track, label, description)
@@ -639,15 +640,15 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
         button = buttons[i]
         if tabs[i].key == key then
           button.text:SetTextColor(1, 1, 1, 1)
-          button:SetBackdropColor(0, 0, 0, 0)
-          button:SetBackdropBorderColor(0, 0, 0, 0)
+          button:SetBackdropColor(0.14, 0.16, 0.20, 1)
+          button:SetBackdropBorderColor(HIGHLIGHT_COLOR[1], HIGHLIGHT_COLOR[2], HIGHLIGHT_COLOR[3], 0.9)
           button.marker:Show()
           button:SetFrameLevel(strip:GetFrameLevel() + 1)
           button.selected = true
         else
-          button.text:SetTextColor(0.64, 0.67, 0.73, 1)
-          button:SetBackdropColor(0, 0, 0, 0)
-          button:SetBackdropBorderColor(0, 0, 0, 0)
+          button.text:SetTextColor(0.72, 0.75, 0.82, 1)
+          button:SetBackdropColor(0.05, 0.06, 0.07, 0.72)
+          button:SetBackdropBorderColor(0.34, 0.37, 0.45, 1)
           button.marker:Hide()
           button:SetFrameLevel(strip:GetFrameLevel())
           button.selected = false
@@ -663,12 +664,12 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
       button:RegisterForClicks("LeftButtonUp")
       local width = max(72, (spec.label and (spec.label:len() * 7) or 40) + 24)
       button:SetWidth(width)
-      button:SetHeight(22)
+      button:SetHeight(24)
       button:SetPoint("TOPLEFT", strip, "TOPLEFT", offset, 0)
       offset = offset + width + 4
       button:SetBackdrop(Style.FLAT_BACKDROP)
-      button:SetBackdropColor(0, 0, 0, 0)
-      button:SetBackdropBorderColor(0, 0, 0, 0)
+      button:SetBackdropColor(0.05, 0.06, 0.07, 0.72)
+      button:SetBackdropBorderColor(0.34, 0.37, 0.45, 1)
 
       button.marker = button:CreateTexture(nil, "ARTWORK")
       button.marker:SetTexture(Style.WHITE)
@@ -687,12 +688,14 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
       button:SetScript("OnClick", function() applySelection(spec.key) end)
       button:SetScript("OnEnter", function()
         if not button.selected then
-          button.text:SetTextColor(0.88, 0.90, 0.94, 1)
+          button.text:SetTextColor(0.95, 0.96, 1, 1)
+          button:SetBackdropBorderColor(0.55, 0.58, 0.66, 1)
         end
       end)
       button:SetScript("OnLeave", function()
         if not button.selected then
-          button.text:SetTextColor(0.64, 0.67, 0.73, 1)
+          button.text:SetTextColor(0.72, 0.75, 0.82, 1)
+          button:SetBackdropBorderColor(0.34, 0.37, 0.45, 1)
         end
       end)
       buttons[i] = button
@@ -715,7 +718,10 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
     local track = CreateFrame("Button", nil, bar)
     track:RegisterForClicks("LeftButtonUp")
     track:SetPoint("TOP", bar, "TOP", 0, 0)
-    track:SetPoint("BOTTOM", bar, "BOTTOM", 0, 0)
+    -- The height must be set explicitly: thumb travel math reads GetHeight,
+    -- and a TOP/BOTTOM-anchored frame does not reliably report its resolved
+    -- height on the 1.12 client.
+    track:SetHeight(viewport:GetHeight())
     track:SetWidth(6)
     track:SetBackdrop(trackBackdrop)
     track:SetBackdropColor(0.055, 0.060, 0.073, 0.58)

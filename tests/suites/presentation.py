@@ -113,6 +113,31 @@ def run(ctx: Context):
       assert(primary.db.segment == "total" and second.db.segment == "total")
       Skada.UI:OnCombatState(true)
       assert(primary.db.segment == "current" and second.db.segment == "total")
+
+      -- per-window combat mode switching
+      primary.db.combatMode, primary.db.returnAfterCombat = "threat", true
+      local modeBefore = primary.db.mode
+      Skada.UI:OnCombatState(true)
+      assert(primary.db.mode == "threat" and primary.db.segment == "current",
+        "combat enter did not switch to the configured combat mode")
+      assert(primary.restoreMode == modeBefore, "combat enter did not save the restore mode")
+      Skada.UI:OnCombatState(false)
+      assert(primary.db.mode == modeBefore and not rawget(primary, "restoreMode"),
+        "combat leave did not restore the previous mode")
+
+      primary.db.combatMode, primary.db.returnAfterCombat = "threat", false
+      Skada.UI:OnCombatState(true)
+      assert(primary.db.mode == "threat" and not rawget(primary, "restoreMode"),
+        "combat enter must not save a restore mode without return-after-combat")
+      Skada.UI:OnCombatState(false)
+      assert(primary.db.mode == "threat",
+        "window without return-after-combat must keep the combat mode")
+      primary.db.combatMode = ""
+      Skada.UI:OnCombatState(false)
+      assert(primary.db.mode == "threat", "empty combat mode must be a no-op")
+      Skada.Modes:Set(modeBefore, primary)
+      assert(primary.db.mode == modeBefore)
+
       assert(Skada.UI:DeleteWindow(second))
       assert(table.getn(Skada.UI.windows) == 1)
       assert(table.getn(Skada.db.profile.windows) == 1)
