@@ -44,8 +44,8 @@ UI.CreateRow = Renderer.CreateRow
 UI.EnsureRows = Renderer.EnsureRows
 UI.ApplyLayout = Renderer.ApplyLayout
 
--- Every drag surface (title bar, window background, hidden-header menu slot,
--- meter bar) shares one move/snap/persist sequence; flagName names the
+-- Every drag surface (title bar, window background, meter bar) shares one
+-- move/snap/persist sequence; flagName names the
 -- per-surface "this was a drag, swallow the click" marker its OnClick reads.
 function UI:BeginWindowDrag(flagName)
   if self.db.locked then return end
@@ -200,7 +200,9 @@ function UI:InitializeWindow(config)
   local owner = self
   self.db = config
 
-  local frame = CreateFrame("Frame", "SkadaBarWindow" .. tostring(config.id), UIParent)
+  -- A Button retains all normal Frame behavior while also receiving clicks
+  -- on exposed window background (including a meter with no visible rows).
+  local frame = CreateFrame("Button", "SkadaBarWindow" .. tostring(config.id), UIParent)
   self.frame = frame
   frame:SetFrameStrata("LOW")
   frame:SetBackdrop(backdrop)
@@ -212,6 +214,23 @@ function UI:InitializeWindow(config)
       owner.manager:SetActive(owner)
       owner:Scroll(delta)
     end
+  end)
+  local function goBack()
+    owner.manager:SetActive(owner)
+    owner.actionMenu:Hide()
+    owner:Back()
+  end
+  frame:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  frame:SetScript("OnClick", function(_, button)
+    button = getClickButton(button)
+    if owner.headerWasDragged then
+      owner.headerWasDragged = false
+      return
+    end
+    if button == "RightButton" then goBack() end
+  end)
+  frame:SetScript("OnMouseDown", function(_, button)
+    if getClickButton(button) == "LeftButton" then owner.headerWasDragged = false end
   end)
   frame:RegisterForDrag("LeftButton")
   frame:SetScript("OnDragStart", function()
@@ -248,6 +267,7 @@ function UI:InitializeWindow(config)
       owner.manager:SetActive(owner)
       owner.actionMenu:Toggle()
     end,
+    rightClick = goBack,
   })
   self.menuButton = menuButton
   menuButton:SetPoint("RIGHT", header, "RIGHT", -2, 0)
@@ -264,6 +284,7 @@ function UI:InitializeWindow(config)
       owner.manager:SyncLegacy(owner)
       Skada:MarkDirty()
     end,
+    rightClick = goBack,
   })
   self.autoButton = autoButton
   autoButton:SetPoint("RIGHT", menuButton, "LEFT", -Style.HEADER_BUTTON_GAP, 0)
@@ -272,6 +293,7 @@ function UI:InitializeWindow(config)
     texture = "Interface\\Icons\\Spell_Nature_Lightning", title = "Mode",
     description = "Show the Skada mode list.",
     click = function() owner.manager:SetActive(owner) owner:SetView("modes") end,
+    rightClick = goBack,
   })
   self.modeButton = modeButton
   modeButton:SetPoint("RIGHT", autoButton, "LEFT", -Style.HEADER_BUTTON_GAP, 0)
@@ -295,13 +317,17 @@ function UI:InitializeWindow(config)
   end)
   header:SetScript("OnClick", function(self, button)
     button = getClickButton(button)
-    owner.manager:SetActive(owner)
-    owner.actionMenu:Hide()
     if owner.headerWasDragged then
       owner.headerWasDragged = false
       return
     end
-    if button == "RightButton" then owner:Back() else owner:Forward() end
+    if button == "RightButton" then
+      goBack()
+    else
+      owner.manager:SetActive(owner)
+      owner.actionMenu:Hide()
+      owner:Forward()
+    end
   end)
   header:SetScript("OnMouseDown", function() owner.headerWasDragged = false end)
 
@@ -324,47 +350,6 @@ function UI:InitializeWindow(config)
     GameTooltip:Hide()
   end)
 
-  -- When the title bar is hidden, this button occupies the top-bar slot so the
-  -- header's navigation and dragging keep working with no header visible.
-  local clickCatcher = CreateFrame("Button", nil, frame)
-  self.clickCatcher = clickCatcher
-  clickCatcher:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-  clickCatcher:RegisterForDrag("LeftButton")
-  clickCatcher:SetScript("OnDragStart", function()
-    owner:BeginWindowDrag("headerWasDragged")
-  end)
-  clickCatcher:SetScript("OnDragStop", function()
-    owner:EndWindowDrag()
-  end)
-  clickCatcher:SetScript("OnClick", function(self, button)
-    button = getClickButton(button)
-    owner.manager:SetActive(owner)
-    if owner.headerWasDragged then
-      owner.headerWasDragged = false
-      return
-    end
-    if button == "RightButton" then
-      -- With the title bar hidden this slot is the window's menu bar.
-      owner.actionMenu:Toggle()
-    else
-      owner.actionMenu:Hide()
-      owner:Forward()
-    end
-  end)
-  clickCatcher:SetScript("OnMouseDown", function() owner.headerWasDragged = false end)
-  clickCatcher:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_TOP")
-    GameTooltip:AddLine(owner.currentTitle or config.name or "Skada", 1, 0.5, 0)
-    GameTooltip:AddLine("Title bar hidden: right-click for the menu, left-click forward, drag to move.", 0.8, 0.8, 0.8)
-    GameTooltip:Show()
-  end)
-  clickCatcher:SetScript("OnLeave", function() GameTooltip:Hide() end)
-  -- Created before the rows and at their default level it would lose
-  -- hit-testing to row 1; sit above the rows or the hidden-header menu
-  -- bar slot never receives clicks.
-  clickCatcher:SetFrameLevel(frame:GetFrameLevel() + 2)
-  clickCatcher:Hide()
-
   local resizeButton = CreateFrame("Button", nil, frame)
   self.resizeButton = resizeButton
   resizeButton:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -2, 2)
@@ -374,6 +359,10 @@ function UI:InitializeWindow(config)
   resizeButton:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
   resizeButton:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
   resizeButton:SetAlpha(0.40)
+  resizeButton:RegisterForClicks("RightButtonUp")
+  resizeButton:SetScript("OnClick", function(_, button)
+    if getClickButton(button) == "RightButton" then goBack() end
+  end)
   resizeButton:SetScript("OnEnter", function() resizeButton:SetAlpha(0.92) end)
   resizeButton:SetScript("OnLeave", function() resizeButton:SetAlpha(0.40) end)
   resizeButton:SetScript("OnMouseDown", function(self, button)

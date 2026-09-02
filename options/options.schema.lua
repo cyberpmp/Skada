@@ -397,11 +397,31 @@ Schema.pages = {
             set = Schema.WindowSet("windowOpacity", true),
           },
           {
-            key = "hideWindowBorder", widget = "checkbox",
-            label = "Borderless windows",
-            description = "Hide the thin window edge and its soft shadow.",
-            get = function() return Skada.db.profile.hideWindowBorder and true or false end,
-            set = Schema.AppearanceSet("hideWindowBorder", true),
+            key = "windowBorderStyle", widget = "dropdown",
+            label = "Window border style",
+            description = "Choose a soft shadow, a plain solid edge, or no window border.",
+            choices = Skada.UIStyle.WINDOW_BORDER_STYLES,
+            get = function()
+              if Skada.db.profile.hideWindowBorder then return "none" end
+              return Skada.db.profile.windowBorderStyle or "shadow"
+            end,
+            set = function(value)
+              Skada.db.profile.windowBorderStyle = value
+              Skada.db.profile.hideWindowBorder = value == "none"
+              Skada.UI:MarkLayouts()
+              Skada:MarkDirty()
+            end,
+          },
+          {
+            key = "windowBorderColor", widget = "swatch",
+            label = "Window border color",
+            description = "Color of the thin window edge in soft-shadow and solid styles.",
+            get = function() return Skada.db.profile.windowBorderColor end,
+            set = function(r, g, b)
+              Skada.db.profile.windowBorderColor = { r, g, b }
+              Skada.UI:MarkLayouts()
+              Skada:MarkDirty()
+            end,
           },
           {
             key = "smoothBars", widget = "checkbox",

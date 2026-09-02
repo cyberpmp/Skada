@@ -2,6 +2,27 @@
 
 All notable changes to the PMP Skada rewrite are documented here.
 
+## 1.2.0 - 2026-09-02
+
+### Added
+
+- Window borders can use the default soft shadow, a plain solid-color edge,
+  or no border; the edge color is configurable.
+
+### Changed
+
+- A hidden title bar now also hides access to window actions and automatic
+  segment switching from the meter. Those settings remain available through
+  `/skada`.
+- Right-clicking anywhere in a meter window consistently navigates back,
+  including its header controls, resize grip, and empty space.
+
+### Fixed
+
+- Hidden-title windows no longer place an invisible control over their first
+  meter row.
+- Right-click navigation works when a meter has no bars to display.
+
 ## 1.1.0 - 2026-09-02
 
 ### Added

@@ -74,6 +74,20 @@ def run(ctx: Context):
       assert(menu.alpha == 1 and not rawget(menu, "OnUpdate"))
       menu:Hide()
 
+      -- Header controls keep their left-click action, but right-click means
+      -- back everywhere inside the window.
+      local autoBefore = meter.db.autoSwitch
+      local i
+      for i = 1, table.getn(meter.headerButtons) do
+        meter:SetView("mode")
+        meter.headerButtons[i].OnClick(meter.headerButtons[i], "RightButton")
+        assert(meter.view == "modes" and not menu:IsShown(),
+          "header control " .. i .. " did not navigate back")
+      end
+      assert(meter.db.autoSwitch == autoBefore,
+        "right-clicking the automatic-segment control toggled it")
+      meter:SetView("mode")
+
       assert(meter.header.height == Style.HEADER_BUTTON_HEIGHT)
       assert(meter.title.lastPoint == "RIGHT" and meter.title.lastRelativeTo == meter.modeButton)
       local defaultWidth, defaultHeight = meter.db.width, meter.frame.height
@@ -108,13 +122,43 @@ def run(ctx: Context):
       assert(meter.frame.skadaBg.alpha == 0.9, "window opacity was not restored")
     ''')
     ctx.run('''
+      local profile = Skada.db.profile
+      local Style = Skada.UIStyle
+      local probe = CreateFrame("Frame", nil, UIParent)
+      local oldStyle, oldColor, oldHidden = profile.windowBorderStyle,
+        profile.windowBorderColor, profile.hideWindowBorder
+
+      profile.hideWindowBorder = false
+      profile.windowBorderColor = { 0.22, 0.44, 0.66 }
+      profile.windowBorderStyle = "solid"
+      Style:ApplyMeterWindow(probe, true, 0.9)
+      assert(probe.borderR == 0.22 and probe.borderG == 0.44 and probe.borderB == 0.66,
+        "solid border did not keep its chosen color while active")
+      assert(not rawget(probe, "skadaShadow"), "solid border created a soft shadow")
+
+      profile.windowBorderStyle = "shadow"
+      Style:ApplyMeterWindow(probe, false, 0.9)
+      assert(probe.skadaShadow and probe.skadaShadow:IsShown(),
+        "soft-shadow border did not show its shadow")
+
+      profile.windowBorderStyle = "none"
+      Style:ApplyMeterWindow(probe, false, 0.9)
+      assert(probe.borderA == 0 and not probe.skadaShadow:IsShown(),
+        "borderless style left an edge or shadow visible")
+
+      profile.windowBorderStyle, profile.windowBorderColor = oldStyle, oldColor
+      profile.hideWindowBorder = oldHidden
+    ''')
+    ctx.run('''
       local meter = Skada.UI:GetPrimary()
       local Style = Skada.UIStyle
       local rowStep = meter.db.barHeight + meter.db.barSpacing
       local fullHeight = Style.HEADER_HEIGHT + meter.db.rows * rowStep + Style.FOOTER_HEIGHT
       assert(meter.frame.height == fullHeight, "window height does not include the header")
-      assert(meter.header:IsShown() and not meter.clickCatcher:IsShown(),
-        "catcher must be hidden while the title bar is shown")
+      assert(meter.frame.frameType == "Button" and meter.header:IsShown(),
+        "meter background must receive clicks while the title bar is shown")
+      assert(not rawget(meter, "clickCatcher"),
+        "a hidden-title overlay would block the first meter row")
 
       meter.db.hideTitle, meter.layoutDirty = true, true
       meter:Refresh()
@@ -123,28 +167,22 @@ def run(ctx: Context):
       assert(meter.frame.height == collapsedHeight,
         "hide-title did not drop the header from the window height")
       assert(meter.rows[1].lastPointY == 0, "row 1 was not re-anchored to the window top")
-      assert(meter.clickCatcher:IsShown(), "hide-title did not show the click catcher")
-      assert(meter.clickCatcher.height == meter.db.barHeight,
-        "click catcher height does not match the top-bar slot")
-      assert(meter.clickCatcher.lastPointY == 0, "click catcher is not in the top-bar slot")
-
-      -- with the title bar hidden the top-bar slot is the window's menu bar
+      -- Hidden title bars expose no menu or automatic-segment control, while
+      -- the window background still handles navigation on an empty meter.
       local menu = meter.actionMenu
-      local viewBefore = meter.view
+      meter.view, meter.detailActor = "mode", nil
       assert(not menu:IsShown())
-      meter.clickCatcher.OnClick(meter.clickCatcher, "RightButton")
-      assert(menu:IsShown(), "catcher right-click did not open the window menu")
-      assert(menu.lastRelativeTo == meter.clickCatcher,
-        "hidden-title menu did not anchor to the top-bar slot")
-      meter.clickCatcher.OnClick(meter.clickCatcher, "RightButton")
-      assert(not menu:IsShown(), "catcher right-click did not close the window menu")
-      meter:Back()
-      meter.clickCatcher.OnClick(meter.clickCatcher, "LeftButton")
-      assert(meter.view == viewBefore, "catcher left-click did not navigate forward")
+      meter.frame.OnClick(meter.frame, "RightButton")
+      assert(meter.view == "modes" and not menu:IsShown(),
+        "hidden-title background right-click did not navigate back")
+      meter.frame.OnClick(meter.frame, "RightButton")
+      assert(meter.view == "segments" and not menu:IsShown(),
+        "empty window-space right-click did not navigate back")
+      meter:SetView("mode")
 
       meter.db.hideTitle, meter.layoutDirty = false, true
       meter:Refresh()
-      assert(meter.header:IsShown() and not meter.clickCatcher:IsShown())
+      assert(meter.header:IsShown())
       assert(meter.frame.height == fullHeight, "window height was not restored with the header")
       assert(meter.rows[1].lastPointY == -Style.HEADER_HEIGHT,
         "row 1 was not re-anchored below the restored header")

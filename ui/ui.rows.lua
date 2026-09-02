@@ -79,7 +79,12 @@ function Renderer:CreateRow(index)
       owner.windowWasDragged = false
       return
     end
-    if button == "RightButton" then owner:Back() else owner:SelectEntry(self.entry) end
+    if button == "RightButton" then
+      if owner.actionMenu then owner.actionMenu:Hide() end
+      owner:Back()
+    else
+      owner:SelectEntry(self.entry)
+    end
   end)
   row:RegisterForDrag("LeftButton")
   row:SetScript("OnMouseDown", function() owner.windowWasDragged = false end)
@@ -133,18 +138,6 @@ function Renderer:ApplyLayout()
   else
     self.header:Show()
   end
-  if self.clickCatcher then
-    self.clickCatcher:ClearAllPoints()
-    if profile.hideTitle then
-      self.clickCatcher:SetPoint("TOPLEFT", self.frame, "TOPLEFT", Style.WINDOW_PADDING, 0)
-      self.clickCatcher:SetPoint("TOPRIGHT", self.frame, "TOPRIGHT", -Style.WINDOW_PADDING, 0)
-      self.clickCatcher:SetHeight(profile.barHeight)
-      self.clickCatcher:Show()
-    else
-      self.clickCatcher:Hide()
-    end
-  end
-
   self:EnsureRows(profile.rows)
   local i, row
   for i = 1, table_getn(self.rows) do

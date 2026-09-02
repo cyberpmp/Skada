@@ -40,7 +40,7 @@ saved-fight segments.
   Damage done out of combat) and a hideable title bar that collapses the
   window to its bars.
 - Smooth bars, class colors and icons, spell colors, custom textures and fonts,
-  configurable row borders, and self highlighting.
+  configurable window and row borders, and self highlighting.
 - A native settings panel and draggable minimap button; no Ace or display
   libraries are loaded at runtime.
 - Chat reports to Guild, Party/Raid, Say, or Whisper.
@@ -58,11 +58,12 @@ saved-fight segments.
 ### Navigation
 
 - Left-click an actor row to open its detail view.
-- Right-click a row or the window header to go back through detail, mode, and
-  fight views.
+- Right-click a row, the window header, or empty window space to go back
+  through detail, mode, and fight views.
 - Left-click the header to move forward through fight, mode, and meter views.
-  With "Hide title bar" enabled, the top bar slot takes over that navigation
-  and drag-to-move behavior, even when no bar is displayed.
+- With "Hide title bar" enabled, title-bar controls are unavailable from the
+  meter; use `/skada` to change their settings. Right-click navigation and
+  drag-to-move still work from the window.
 - Click the lightning icon to open the mode list.
 - Click `A` to toggle automatic segments: Current while in combat and Overall
   when out of combat.

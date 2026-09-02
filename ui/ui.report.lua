@@ -71,7 +71,15 @@ function Report:CreateHeaderButton(parent, spec)
 
   Style:ApplyButton(button)
   button:SetAlpha(Style.HEADER_BUTTON_ALPHA)
-  button:SetScript("OnClick", spec.click)
+  button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  button:SetScript("OnClick", function(self, clickButton)
+    clickButton = Common.GetClickButton(clickButton)
+    if clickButton == "RightButton" then
+      if spec.rightClick then spec.rightClick(self) end
+    else
+      spec.click(self)
+    end
+  end)
   button:SetScript("OnEnter", function(self)
     Style:ApplyButton(self, true)
     self:SetAlpha(1)
@@ -232,14 +240,7 @@ function Report:CreateActionMenu(owner, anchor)
     end
     self:Refresh()
     self:ClearAllPoints()
-    local anchor = self.anchor
-    -- With the title bar hidden the gear button is gone; drop the menu from
-    -- the top-bar slot instead so it still reads as the window's menu bar.
-    local owner = self.owner
-    if owner and owner.header and not owner.header:IsShown() and owner.clickCatcher then
-      anchor = owner.clickCatcher
-    end
-    self:SetPoint("TOPRIGHT", anchor, "BOTTOMRIGHT", 0, -4)
+    self:SetPoint("TOPRIGHT", self.anchor, "BOTTOMRIGHT", 0, -4)
     self:Show()
     Style:FadeIn(self, 0.45, 0.10, 1)
   end
