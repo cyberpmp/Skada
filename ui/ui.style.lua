@@ -60,6 +60,12 @@ Style.SHADOW_BACKDROP = {
   insets = { left = 0, right = 0, top = 0, bottom = 0 },
 }
 
+Style.WINDOW_BORDER_STYLES = {
+  { value = "shadow", label = "Soft shadow (default)" },
+  { value = "solid", label = "Solid color" },
+  { value = "none", label = "None" },
+}
+
 Style.BAR_TEXTURES = {
   { value = "flat", label = "Flat (default)" },
   { value = "banto", label = "Smooth" },
@@ -178,9 +184,13 @@ end
 
 function Style:ApplyMeterWindow(frame, active, opacity)
   local profile = Skada.db.profile
-  local hideBorder = profile.hideWindowBorder and true or false
-  local borderR, borderG, borderB = 0.10, 0.11, 0.14
-  if active and not hideBorder then
+  local borderStyle = profile.hideWindowBorder and "none" or profile.windowBorderStyle or "shadow"
+  local hideBorder = borderStyle == "none"
+  local color = profile.windowBorderColor or { 0.10, 0.11, 0.14 }
+  local borderR, borderG, borderB = color[1] or 0.10, color[2] or 0.11, color[3] or 0.14
+  -- Solid is deliberately stable: selecting the window must not replace the
+  -- chosen edge color with the active-window highlight.
+  if active and borderStyle == "shadow" then
     if profile.classColorMenus then
       borderR, borderG, borderB = self:GetAccentColor()
       borderR, borderG, borderB = borderR * 0.72, borderG * 0.72, borderB * 0.72
@@ -192,7 +202,7 @@ function Style:ApplyMeterWindow(frame, active, opacity)
   frame:SetBackdropBorderColor(borderR, borderG, borderB, 1)
   self:ApplyWindowBackground(frame, opacity or 0.9)
   if hideBorder then frame:SetBackdropBorderColor(0, 0, 0, 0) end
-  self:ApplyShadow(frame, not hideBorder)
+  self:ApplyShadow(frame, borderStyle == "shadow")
 end
 
 function Style:ApplyHeader(window)

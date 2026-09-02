@@ -44,6 +44,9 @@ Defaults.schema = {
     barBorder = false,
     barBorderColor = { 1.0, 1.0, 1.0 },
     windowOpacity = 0.90,
+    windowBorderStyle = "shadow",
+    windowBorderColor = { 0.10, 0.11, 0.14 },
+    -- Kept for saved-variable compatibility; windowBorderStyle supersedes it.
     hideWindowBorder = false,
     smoothBars = true,
     barSpeed = 8,

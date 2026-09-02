@@ -11,6 +11,9 @@ def run(ctx: Context):
     assert primary.frame is not None and primary.title is not None
     assert len(skada.UI.windows) == 1
     assert primary.db.snap is True and primary.db.snapDistance == 12 and primary.db.snapGap == 0 and primary.db.snapSize is True
+    assert skada.db.profile.windowBorderStyle == "shadow"
+    border = skada.db.profile.windowBorderColor
+    assert border[1] == 0.10 and border[2] == 0.11 and border[3] == 0.14
     ctx.run(r'''
       local originalCount = table.getn(Skada.tickers)
       local healthyCalls = 0

@@ -24,7 +24,7 @@ def run(ctx: Context):
       assert(not rawget(Skada.Options.scrollbar, "up") and not rawget(Skada.Options.scrollbar, "down"))
       Skada.Options:OpenPage("window")
       local windowSpec = Skada.OptionsSchema.pages.window.rows
-      assert(windowSpec and table.getn(windowSpec) == 39, "window page must hold every row")
+      assert(windowSpec and table.getn(windowSpec) == 40, "window page must hold every row")
       assert(windowSpec[1].key == "combatHeader" and windowSpec[1].widget == "header")
       Skada.Options:OpenPage("general")
       local capturedScroll = -1
@@ -298,6 +298,18 @@ def run(ctx: Context):
       assert(second.db.segment == "total", second.db.segment)
       pickDropdown(rowForKey.segment, "current")
       assert(second.db.segment == "current", second.db.segment)
+
+      assert(rowForKey.windowBorderStyle and rowForKey.windowBorderColor,
+        "window border controls missing from the window page")
+      pickDropdown(rowForKey.windowBorderStyle, "solid")
+      assert(Skada.db.profile.windowBorderStyle == "solid" and
+        not Skada.db.profile.hideWindowBorder,
+        "solid window border choice was not saved")
+      pickDropdown(rowForKey.windowBorderStyle, "none")
+      assert(Skada.db.profile.hideWindowBorder,
+        "borderless choice did not preserve the legacy setting")
+      pickDropdown(rowForKey.windowBorderStyle, "shadow")
+      assert(not Skada.db.profile.hideWindowBorder)
 
       assert(rowForKey.hideTitle and rowForKey.combatMode and rowForKey.returnAfterCombat,
         "hide-title and combat-switch rows missing from the window page")
