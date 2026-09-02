@@ -47,9 +47,9 @@ def run(ctx: Context):
       assert(meter.autoButton.text.textR == 0.2 and meter.autoButton.text.textG == 1 and
         meter.autoButton.text.textB == 0.2)
       assert(meter.headerRule and
-        meter.headerRule.alpha == 0.52 * meter.db.windowOpacity,
-        "active header rule must fade with window opacity")
-      assert(meter.title.textR == 0.94 and meter.title.textG == 0.95 and meter.title.textB == 0.98)
+        meter.headerRule.alpha == 0.20 * meter.db.windowOpacity,
+        "meter loaded with settings-selection chrome")
+      assert(meter.title.textR == 0.76 and meter.title.textG == 0.79 and meter.title.textB == 0.84)
 
       local menu = meter.actionMenu
       assert(menu and not menu:IsShown())
@@ -86,6 +86,8 @@ def run(ctx: Context):
       end
       assert(meter.db.autoSwitch == autoBefore,
         "right-clicking the automatic-segment control toggled it")
+      assert(Skada.UI.visualActive == nil,
+        "ordinary meter clicks introduced settings-selection chrome")
       meter:SetView("mode")
 
       assert(meter.header.height == Style.HEADER_BUTTON_HEIGHT)
@@ -122,32 +124,84 @@ def run(ctx: Context):
       assert(meter.frame.skadaBg.alpha == 0.9, "window opacity was not restored")
     ''')
     ctx.run('''
+      local bordered = {
+        visualVersion = 4,
+        hideWindowBorder = false,
+        windowBorderStyle = "shadow",
+        windows = {},
+      }
+      Skada.WindowConfig.Migrate(bordered)
+      assert(bordered.visualVersion == 5 and bordered.windowBorderStyle == "solid",
+        "existing bordered profile kept the default grey glow")
+
+      local borderless = {
+        visualVersion = 4,
+        hideWindowBorder = true,
+        windowBorderStyle = "shadow",
+        windows = {},
+      }
+      Skada.WindowConfig.Migrate(borderless)
+      assert(borderless.visualVersion == 5 and borderless.windowBorderStyle == "none",
+        "border migration changed an existing borderless profile")
+
+      local profile = Skada.db.profile
+      local primary = Skada.UI:GetPrimary()
+      local oldStyle, oldWindowVersion = profile.windowBorderStyle,
+        primary.db.visualVersion
+      profile.visualVersion = 5
+      profile.windowBorderStyle = "shadow"
+      primary.db.visualVersion = 4
+      Skada.WindowConfig.SyncLegacy(Skada.UI, primary)
+      assert(profile.visualVersion == 5,
+        "primary-window sync downgraded the profile migration version")
+      Skada.WindowConfig.Migrate(profile)
+      assert(profile.windowBorderStyle == "shadow",
+        "reload migration overwrote an explicitly selected border style")
+      profile.windowBorderStyle = oldStyle
+      primary.db.visualVersion = oldWindowVersion
+    ''')
+    ctx.run('''
       local profile = Skada.db.profile
       local Style = Skada.UIStyle
       local probe = CreateFrame("Frame", nil, UIParent)
-      local oldStyle, oldColor, oldHidden = profile.windowBorderStyle,
-        profile.windowBorderColor, profile.hideWindowBorder
+      local oldStyle, oldColor, oldHidden, oldClassChrome = profile.windowBorderStyle,
+        profile.windowBorderColor, profile.hideWindowBorder, profile.classColorMenus
 
       profile.hideWindowBorder = false
+      profile.classColorMenus = false
       profile.windowBorderColor = { 0.22, 0.44, 0.66 }
       profile.windowBorderStyle = "solid"
-      Style:ApplyMeterWindow(probe, true, 0.9)
-      assert(probe.borderR == 0.22 and probe.borderG == 0.44 and probe.borderB == 0.66,
-        "solid border did not keep its chosen color while active")
+      Style:ApplyMeterWindow(probe, false, 0.9)
+      local edges = rawget(probe, "skadaBorderEdges")
+      assert(edges and edges[1].vertexR == 0.22 and edges[1].vertexG == 0.44 and
+        edges[1].vertexB == 0.66 and edges[1]:IsShown(),
+        "inactive solid border did not load with its chosen color")
       assert(not rawget(probe, "skadaShadow"), "solid border created a soft shadow")
 
       profile.windowBorderStyle = "shadow"
-      Style:ApplyMeterWindow(probe, false, 0.9)
+      Style:ApplyMeterWindow(probe, true, 0.9)
+      assert(edges[1].vertexR == 0.22 and edges[1].vertexG == 0.44 and
+        edges[1].vertexB == 0.66,
+        "active soft-shadow border replaced its configured color")
       assert(probe.skadaShadow and probe.skadaShadow:IsShown(),
         "soft-shadow border did not show its shadow")
 
+      profile.classColorMenus = true
+      local classR, classG, classB = Style:GetAccentColor()
+      Style:ApplyMeterWindow(probe, true, 0.9)
+      assert(edges[1].vertexR == classR * 0.72 and edges[1].vertexG == classG * 0.72 and
+        edges[1].vertexB == classB * 0.72,
+        "class-colored chrome did not tint the active soft-shadow edge")
+
+      profile.classColorMenus = false
       profile.windowBorderStyle = "none"
       Style:ApplyMeterWindow(probe, false, 0.9)
-      assert(probe.borderA == 0 and not probe.skadaShadow:IsShown(),
-        "borderless style left an edge or shadow visible")
+      assert(rawget(probe, "backdrop") == nil and not edges[1]:IsShown() and
+        not probe.skadaShadow:IsShown(),
+        "borderless style left a backdrop edge or shadow visible")
 
       profile.windowBorderStyle, profile.windowBorderColor = oldStyle, oldColor
-      profile.hideWindowBorder = oldHidden
+      profile.hideWindowBorder, profile.classColorMenus = oldHidden, oldClassChrome
     ''')
     ctx.run('''
       local meter = Skada.UI:GetPrimary()
@@ -255,7 +309,9 @@ def run(ctx: Context):
     ctx.run('''
       -- PersistGeometry must preserve an off-grid height exactly (snapSize
       -- copies the neighbour's raw pixel height) so a later ApplyLayout
-      -- reproduces it instead of popping the window to a new size.
+      -- reproduces it instead of popping the window to a new size or
+      -- unaligning a snapped edge; the fractional remainder paints as a
+      -- short trailing bar rather than an empty band.
       local Style = Skada.UIStyle
       local gridFrame = {
         GetWidth = function() return 240 end,
@@ -276,6 +332,26 @@ def run(ctx: Context):
       assert(gridWindow.db.rows ~= math.floor(gridWindow.db.rows),
         "off-grid height was rounded down to whole rows")
       assert(gridWindow.layoutDirty, "PersistGeometry did not mark the layout dirty")
+    ''')
+    ctx.run('''
+      -- A fractional row count (a snap-copied off-grid height) must fill the
+      -- window to its bottom edge: the whole rows paint at full height and
+      -- the remainder paints as a short trailing bar instead of leaving an
+      -- empty band under the last bar.
+      local meter = Skada.UI:GetPrimary()
+      local Style = Skada.UIStyle
+      local savedRows = meter.db.rows
+      local rowStep = meter.db.barHeight + meter.db.barSpacing
+      meter.db.rows = 6.4
+      meter.layoutDirty = true
+      meter:Refresh()
+      assert(meter.frame.height == Style.HEADER_HEIGHT + meter.db.rows * rowStep + Style.FOOTER_HEIGHT,
+        "frame did not keep the snap-copied fractional height")
+      assert(meter.rows[6].height == meter.db.barHeight, "row 6 is not a full bar")
+      assert(meter.rows[7].height == (meter.db.rows - 6) * rowStep - meter.db.barSpacing,
+        "the fractional row remainder did not paint as a trailing bar")
+      meter.db.rows, meter.layoutDirty = savedRows, true
+      meter:Refresh()
     ''')
     ctx.run('''
       -- Side-by-side dock: adopt the target's height, keep the width.

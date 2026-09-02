@@ -1,12 +1,43 @@
 # Skada for OctoWoW
 
-Skada is a lightweight combat meter for the OctoWoW Vanilla 1.12.1 client. It
-uses ClassicAPI for identity, cast, aura, and creature data while retaining a
-small, framework-free runtime.
+A lightweight, framework-free combat meter built specifically for the
+OctoWoW Vanilla 1.12.1 client. Skada combines detailed combat analysis with
+independent meter windows, fast drill-down navigation, and native in-game
+configuration.
 
 > [!IMPORTANT]
 > `!!!ClassicAPI` is required. This addon is not compatible with an unmodified
 > stock 1.12.1 client.
+
+## Showcase
+
+### Build a meter layout that fits your UI
+
+Every window keeps its own mode, segment, size, position, and combat behavior.
+Snap meters together into a compact dashboard, or hide their title bars for a
+minimal presentation.
+
+<p align="center">
+  <a href="docs/images/skada-windows.png">
+    <img src="docs/images/skada-windows.png" alt="Skada windows arranged as a compact combat dashboard">
+  </a>
+</p>
+
+<p align="center"><sub>Independent Damage, Healing, and Dispels views arranged in a snapped layout.</sub></p>
+
+### Configure each window in-game
+
+The native settings panel gives every meter its own appearance, mode, data
+source, automatic switching, and layout options. Changes apply immediately,
+without an external configuration framework.
+
+<p align="center">
+  <a href="docs/images/skada-settings.png">
+    <img src="docs/images/skada-settings.png" alt="Skada native settings panel showing per-window design controls">
+  </a>
+</p>
+
+<p align="center"><sub>Per-window controls are organized in a clear, scrollable settings panel.</sub></p>
 
 ## Features
 

@@ -403,7 +403,7 @@ Schema.pages = {
             choices = Skada.UIStyle.WINDOW_BORDER_STYLES,
             get = function()
               if Skada.db.profile.hideWindowBorder then return "none" end
-              return Skada.db.profile.windowBorderStyle or "shadow"
+              return Skada.db.profile.windowBorderStyle or "solid"
             end,
             set = function(value)
               Skada.db.profile.windowBorderStyle = value

@@ -3,12 +3,21 @@ local Skada = (_G or getfenv(0)).Skada
 local WindowConfig = {}
 Skada.WindowConfig = WindowConfig
 
+local floor = math.floor
+local max = math.max
 local table_getn = table.getn
+local tonumber = tonumber
+
+-- Snap-size keeps fractional rows so a copied window height can be rebuilt
+-- exactly. Rendering and pagination still operate on complete row slots.
+function WindowConfig.GetVisibleRowCount(config)
+  return max(1, floor(tonumber(config and config.rows) or 1))
+end
 
 WindowConfig.keys = {
   "visible", "locked", "width", "rows", "barHeight", "barSpacing",
   "fontSize", "barAlpha", "windowOpacity", "mode", "segment", "point",
-  "relativePoint", "x", "y", "visualVersion", "autoSwitch", "snap",
+  "relativePoint", "x", "y", "autoSwitch", "snap",
   "snapDistance", "snapGap", "snapSize", "hideTitle", "combatMode",
   "returnAfterCombat", "nameIsCustom",
 }
@@ -61,6 +70,13 @@ function WindowConfig.SyncLegacy(manager, window)
 end
 
 function WindowConfig.Migrate(profile)
+  local i
+  -- Migration state belongs to the profile. Older builds copied it into each
+  -- window, where primary-window synchronization could later downgrade it.
+  for i = 1, table_getn(profile.windows or {}) do
+    profile.windows[i].visualVersion = nil
+  end
+
   if not profile.visualVersion then
     if profile.width == 230 and profile.barHeight == 17 and profile.barSpacing == 1 then
       profile.width, profile.barHeight, profile.barSpacing = 240, 18, 0
@@ -70,7 +86,7 @@ function WindowConfig.Migrate(profile)
   end
 
   if profile.visualVersion < 3 then
-    local i, config
+    local config
     for i = 1, table_getn(profile.windows or {}) do
       config = profile.windows[i]
       if config.fontSize == 14 then config.fontSize = 15 end
@@ -82,7 +98,7 @@ function WindowConfig.Migrate(profile)
   end
 
   if profile.visualVersion < 4 then
-    local i, config
+    local config
     for i = 1, table_getn(profile.windows or {}) do
       config = profile.windows[i]
       if config.barSpacing == 0 then config.barSpacing = 2 end
@@ -91,5 +107,16 @@ function WindowConfig.Migrate(profile)
     if profile.barSpacing == 0 then profile.barSpacing = 2 end
     if profile.barAlpha == 0.92 then profile.barAlpha = 0.90 end
     profile.visualVersion = 4
+  end
+
+  if profile.visualVersion < 5 then
+    -- Early border-style builds inherited the soft grey glow. Move existing
+    -- profiles to the plain configured edge; the shadow remains opt-in.
+    if profile.hideWindowBorder then
+      profile.windowBorderStyle = "none"
+    else
+      profile.windowBorderStyle = "solid"
+    end
+    profile.visualVersion = 5
   end
 end

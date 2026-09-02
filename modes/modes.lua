@@ -166,6 +166,10 @@ function Modes:Set(value, window)
       if window and window.db == config and self:IsAutoNamed(config) and config.name ~= mode.title then
         config.name = mode.title
         if window.title then window.title:SetText(config.name) end
+        -- the settings tree reads db.name at build time; a rename triggered
+        -- from the meter or a combat mode switch must refresh it the same
+        -- way the settings-side callers do
+        Skada:Publish("windowListChanged", Skada.UI)
         renamed = true
       end
       if window and window.db == config and Skada.Data and Skada.Data.clientInCombat

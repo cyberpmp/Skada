@@ -11,10 +11,22 @@ def run(ctx: Context):
     assert primary.frame is not None and primary.title is not None
     assert len(skada.UI.windows) == 1
     assert primary.db.snap is True and primary.db.snapDistance == 12 and primary.db.snapGap == 0 and primary.db.snapSize is True
-    assert skada.db.profile.windowBorderStyle == "shadow"
+    assert skada.db.profile.windowBorderStyle == "solid"
     border = skada.db.profile.windowBorderColor
     assert border[1] == 0.10 and border[2] == 0.11 and border[3] == 0.14
+    assert skada.UI.visualActive is None
     ctx.run(r'''
+      local frame = Skada.UI:GetPrimary().frame
+      local border = Skada.db.profile.windowBorderColor
+      local edges = rawget(frame, "skadaBorderEdges")
+      assert(edges and edges[1].vertexR == border[1] and
+        edges[1].vertexG == border[2] and edges[1].vertexB == border[3],
+        "default bordered window did not load with its configured color")
+      assert(table.getn(edges) == 4 and edges[1].height == 1 and
+        edges[2].height == 1 and edges[3].width == 1 and edges[4].width == 1,
+        "primary window border is not one pixel on every side")
+      assert(not rawget(Skada.UI:GetPrimary().frame, "skadaShadow"),
+        "default bordered window created the grey outer glow")
       local originalCount = table.getn(Skada.tickers)
       local healthyCalls = 0
       Skada:RegisterTicker("test-failing", 0.01, function() error("expected ticker failure") end)

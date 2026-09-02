@@ -2,7 +2,7 @@
 ## Title: |cffff8000Skada|r
 ## Notes: Lightweight combat meter for Vanilla 1.12.1 and ClassicAPI.
 ## Author: PMP (cyberpmp)
-## Version: 1.2.0
+## Version: 1.2.1
 ## OptionalDeps: !!!ClassicAPI, BigWigs
 ## SavedVariables: SkadaDB
 ## LoadSavedVariablesFirst: 1

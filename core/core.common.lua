@@ -41,6 +41,11 @@ function Common.Wipe(tbl)
     local key
     for key in pairs(tbl) do tbl[key] = nil end
   end
+  -- Lua 5.0 (the client runtime): table.insert/table.remove maintain an
+  -- out-of-band size that table.getn trusts, and wiping the keys does not
+  -- reset it -- a wiped list would keep reporting its previous length. The
+  -- addon mixes wipes with getn-based iteration, so clear the size too.
+  if table.setn then table.setn(tbl, 0) end
 end
 
 function Common.Trim(value)

@@ -173,11 +173,13 @@ function SnapDock.PersistGeometry(window, persistPoint)
   local contentHeight = frame:GetHeight() - headerHeight - Style.FOOTER_HEIGHT
   -- Keep the exact ratio instead of rounding to whole rows so ApplyLayout's
   -- rows * rowStep reconstruction reproduces this height precisely: snapSize
-  -- copies the neighbour's raw pixel height, and rounding it here would make
-  -- the window pop to a different size at the next rebuild. A partial final
-  -- row just leaves a sliver of space under the last bar. Only the 3..30
-  -- clamp may change the height, and the SetHeight below settles that
-  -- immediately rather than deferring it to the next rebuild.
+  -- copies the neighbour's raw pixel height, and rounding it here would
+  -- unalign a snapped edge the moment the drag ends (a hidden-title window
+  -- adopting a titled window's height cannot even represent the header delta
+  -- in whole rows). The fractional final row is not dead space anymore:
+  -- ApplyLayout paints it as a short trailing bar. Only the 3..30 clamp may
+  -- change the height, and the SetHeight below settles that immediately
+  -- rather than deferring it to the next rebuild.
   profile.rows = min(30, max(3, contentHeight / rowStep))
   if frame.SetHeight then
     frame:SetHeight(headerHeight + profile.rows * rowStep + Style.FOOTER_HEIGHT)

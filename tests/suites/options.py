@@ -52,17 +52,25 @@ def run(ctx: Context):
       assert(Skada.Options.frame.alpha == 1 and not rawget(Skada.Options.frame, "OnUpdate"))
       local primary = Skada.UI:GetPrimary()
       assert(Skada.Options.selectedWindow == primary)
+      assert(Skada.UI.visualActive == primary,
+        "opening settings did not show its window selection")
 
-      -- closing the settings must drop the selection border from the meters
+      -- Selection must never replace the configured border color. Closing
+      -- settings still clears the logical visual selection used by headers.
       Skada.Options:SelectWindow(primary)
-      local borderWhileSelected = primary.frame.borderR
+      local configuredBorder = Skada.db.profile.windowBorderColor
+      local borderEdges = rawget(primary.frame, "skadaBorderEdges")
+      assert(borderEdges and borderEdges[1].vertexR == configuredBorder[1] and
+        borderEdges[1].vertexG == configuredBorder[2] and
+        borderEdges[1].vertexB == configuredBorder[3],
+        "selecting a window replaced its configured border color")
       Skada.Options.frame.OnHide()
       assert(Skada.UI.visualActive == nil, "settings close kept the visual selection")
-      assert(primary.frame.borderR == 0.10 and primary.frame.borderR ~= borderWhileSelected,
-        "settings close did not drop the selection border")
+      assert(borderEdges[1].vertexR == configuredBorder[1],
+        "settings close changed the configured border color")
       Skada.Options:SelectWindow(primary)
-      assert(primary.frame.borderR == borderWhileSelected,
-        "reselecting did not restore the selection border")
+      assert(borderEdges[1].vertexR == configuredBorder[1],
+        "reselecting changed the configured border color")
       Skada.Options:OpenPage("general")
 
       assert(Skada.Options.currentPage == "general")
@@ -308,8 +316,9 @@ def run(ctx: Context):
       pickDropdown(rowForKey.windowBorderStyle, "none")
       assert(Skada.db.profile.hideWindowBorder,
         "borderless choice did not preserve the legacy setting")
-      pickDropdown(rowForKey.windowBorderStyle, "shadow")
-      assert(not Skada.db.profile.hideWindowBorder)
+      pickDropdown(rowForKey.windowBorderStyle, "solid")
+      assert(Skada.db.profile.windowBorderStyle == "solid" and
+        not Skada.db.profile.hideWindowBorder)
 
       assert(rowForKey.hideTitle and rowForKey.combatMode and rowForKey.returnAfterCombat,
         "hide-title and combat-switch rows missing from the window page")
@@ -383,6 +392,24 @@ def run(ctx: Context):
         if type(nodeRow.node) == "table" and nodeRow.node.window then windowNodes = windowNodes + 1 end
       end
       assert(windowNodes == 2, windowNodes)
+
+      -- regression: a window created after a delete must stay visible to
+      -- getn-based loops. The client is Lua 5.0, whose table.getn trusts the
+      -- size cache table.remove maintains; a manual `windows[getn + 1] = v`
+      -- append after a delete left the new window rendering on screen while
+      -- the settings tree and every other getn loop could not see it.
+      local fourth = Skada.UI:CreateNew()
+      assert(fourth and Skada.UI.byID[fourth.db.id] == fourth,
+        "window created after a delete missed the registry")
+      assert(table.getn(Skada.db.profile.windows) == 3,
+        table.getn(Skada.db.profile.windows))
+      windowNodes = 0
+      for i = 1, table.getn(Skada.Options.treeRows) do
+        local nodeRow = Skada.Options.treeRows[i]
+        if type(nodeRow.node) == "table" and nodeRow.node.window then windowNodes = windowNodes + 1 end
+      end
+      assert(windowNodes == 3, windowNodes)
+      Skada.UI:DeleteWindow(fourth)
 
       local profile = Skada.db.profile
       assert(Skada.Common.FormatNumber(1234) == "1234")

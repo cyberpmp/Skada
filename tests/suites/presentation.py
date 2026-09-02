@@ -70,6 +70,23 @@ def run(ctx: Context):
       assert(primary.view == "modes")
       primary:Refresh()
       assert(primary.displayCount == table.getn(Skada.Modes.list))
+
+      -- Snap-size may preserve an exact height as a fractional row count.
+      -- Pagination must still end on whole table indices or the mode list
+      -- becomes blank at its final scroll position.
+      local savedModeRows = primary.db.rows
+      primary.db.rows = 3.5
+      for i = 1, primary.displayCount + 2 do primary:Scroll(-1) end
+      local expectedOffset = primary.displayCount - 3
+      assert(primary.scrollOffset == expectedOffset and
+        primary.scrollOffset == math.floor(primary.scrollOffset),
+        "fractional rows produced a fractional final scroll offset")
+      assert(primary.rows[1].entry == primary.display[expectedOffset + 1] and
+        primary.rows[3].entry == primary.display[primary.displayCount],
+        "mode list went blank at its final scroll position")
+      primary.db.rows, primary.scrollOffset = savedModeRows, 0
+      primary:PaintRows()
+
       primary:Scroll(-1)
       assert(primary.scrollOffset == 1)
       primary:Back()
