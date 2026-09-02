@@ -8,11 +8,26 @@ local getClickButton = Common.GetClickButton
 local getWheelDelta = Common.GetWheelDelta
 local setReadableFont = Common.SetFont
 local Style = Skada.UIStyle
+local getVisibleRowCount = Skada.WindowConfig.GetVisibleRowCount
 
 local abs = math.abs
+local floor = math.floor
 local max = math.max
 local min = math.min
 local table_getn = table.getn
+
+-- A fractional row count comes from an off-grid height: snapSize copies the
+-- neighbour's raw pixel height, and a manual resize can land between rows.
+-- The whole rows paint at full height and the remainder paints as a short
+-- trailing bar, so the window fills to its bottom edge instead of ending in
+-- an empty band and a snapSize adopt keeps the neighbour's exact height.
+-- The remainder only becomes a bar when it is tall enough to read as one.
+local function getPartialRowHeight(profile, rowStep)
+  local rows = tonumber(profile.rows) or 0
+  local strip = (rows - floor(rows)) * rowStep - profile.barSpacing
+  if strip >= 6 then return strip end
+  return 0
+end
 
 function Renderer:CreateRow(index)
   local owner = self
@@ -118,9 +133,14 @@ end
 
 function Renderer:ApplyLayout()
   local profile = self.db
+  local visibleRows = getVisibleRowCount(profile)
   profile.width = max(Style.MIN_WINDOW_WIDTH, profile.width or Style.MIN_WINDOW_WIDTH)
   local rowStep = profile.barHeight + profile.barSpacing
   local headerHeight = profile.hideTitle and 0 or Style.HEADER_HEIGHT
+  -- The frame keeps the stored height exactly, fractional rows included (see
+  -- PersistGeometry): rounding here would pop snapped windows to a new size
+  -- at the next rebuild. The fractional remainder paints as a short trailing
+  -- bar, so the frame is never taller than its content.
   local height = headerHeight + profile.rows * rowStep + Style.FOOTER_HEIGHT
   self.frame:SetWidth(profile.width)
   self.frame:SetHeight(height)
@@ -138,19 +158,22 @@ function Renderer:ApplyLayout()
   else
     self.header:Show()
   end
-  self:EnsureRows(profile.rows)
+  local partialHeight = getPartialRowHeight(profile, rowStep)
+  self:EnsureRows(visibleRows + (partialHeight > 0 and 1 or 0))
   local i, row
   for i = 1, table_getn(self.rows) do
     row = self.rows[i]
     row:ClearAllPoints()
     row:SetPoint("TOPLEFT", self.frame, "TOPLEFT", Style.WINDOW_PADDING, -headerHeight - (i - 1) * rowStep)
     row:SetPoint("TOPRIGHT", self.frame, "TOPRIGHT", -Style.WINDOW_PADDING, -headerHeight - (i - 1) * rowStep)
-    row:SetHeight(profile.barHeight)
+    local rowHeight = profile.barHeight
+    if partialHeight > 0 and i == visibleRows + 1 then rowHeight = partialHeight end
+    row:SetHeight(rowHeight)
     row.icon:SetWidth(max(10, profile.barHeight - 4))
     row.icon:SetHeight(max(10, profile.barHeight - 4))
     setReadableFont(row.left, profile.fontSize)
     setReadableFont(row.right, profile.fontSize)
-    if i <= profile.rows then row:Show() else row:Hide() end
+    if i <= visibleRows + (partialHeight > 0 and 1 or 0) then row:Show() else row:Hide() end
   end
 
   setReadableFont(self.title, 13)
@@ -180,10 +203,13 @@ end
 function Renderer:PaintRows()
   local profile = self.db
   local count = self.displayCount or 0
-  local maxOffset = max(0, count - profile.rows)
-  self.scrollOffset = min(maxOffset, max(0, self.scrollOffset or 0))
+  local visibleRows = getVisibleRowCount(profile)
+  local partialHeight = getPartialRowHeight(profile, profile.barHeight + profile.barSpacing)
+  local paintRows = visibleRows + (partialHeight > 0 and 1 or 0)
+  local maxOffset = max(0, count - visibleRows)
+  self.scrollOffset = min(maxOffset, max(0, floor(self.scrollOffset or 0)))
 
-  self.animatedRows = min(profile.rows, max(0, count - self.scrollOffset))
+  self.animatedRows = min(paintRows, max(0, count - self.scrollOffset))
   local maximum = self.paintMaximum or 1
   local targetKey = self.paintLive and Skada.Threat and Skada.Threat.targetKey or nil
 
@@ -195,11 +221,12 @@ function Renderer:PaintRows()
   local playerName = UnitName and UnitName("player") or nil
   local pinnedEntry, pinnedIndex = self:GetPinnedPlayerEntry(playerName, count)
   local i, displayIndex, row, entry, r, g, b
-  for i = 1, profile.rows do
+  for i = 1, paintRows do
     row = self.rows[i]
     displayIndex = self.scrollOffset + i
     entry = self.display[displayIndex]
     row.skadaPinned = nil
+    local partial = i > visibleRows
     if pinnedEntry and i == 1 then
       entry = pinnedEntry
       displayIndex = pinnedIndex
@@ -208,6 +235,9 @@ function Renderer:PaintRows()
     row.entry = entry
     if entry then
       row:Show()
+      -- a row can flip between a full row and the trailing bar as it scrolls;
+      -- the labels and icon live on this layer
+      if not partial then row.textLayer:Show() end
       if row.lastBarTexture ~= barTexture or row.lastOpacity ~= windowOpacity then
         row.lastBarTexture = barTexture
         row.lastOpacity = windowOpacity
@@ -221,7 +251,19 @@ function Renderer:PaintRows()
         row.bar:SetMinMaxValues(0, maximum)
       end
       local icon, iconKey, iconCoords
-      if entry.spell then
+      if partial then
+        -- A trailing bar stays label-free: its height cannot fit the font
+        -- cleanly, and its entry reads in full once it scrolls onto a page.
+        -- Reset the icon bookkeeping so a later full-row paint restores it.
+        row.textLayer:Hide()
+        if row.lastIcon ~= nil then
+          row.lastIcon = nil
+          row.icon:Hide()
+          row.left:ClearAllPoints()
+          row.left:SetPoint("LEFT", row, "LEFT", 4, 0)
+          row.left:SetPoint("RIGHT", row.right, "LEFT", -5, 0)
+        end
+      elseif entry.spell then
         if entry.spell.id and Skada.Tracking then
           icon = Skada.Tracking:GetSpellIcon(entry.spell.id)
         end

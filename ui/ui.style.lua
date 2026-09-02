@@ -45,15 +45,6 @@ Style.FLAT_BACKDROP = {
   insets = { left = -1, right = -1, top = -1, bottom = -1 },
 }
 
--- Meter-window border only; the window fill is a dedicated texture so its
--- opacity can ride on SetAlpha (backdrop-color alpha is not reliable on
--- every client, and a near-opaque row background sits on top anyway).
-Style.WINDOW_BORDER_BACKDROP = {
-  edgeFile = Style.WHITE,
-  edgeSize = 1,
-  insets = { left = -1, right = -1, top = -1, bottom = -1 },
-}
-
 Style.SHADOW_BACKDROP = {
   edgeFile = Style.SHADOW,
   edgeSize = 8,
@@ -61,8 +52,8 @@ Style.SHADOW_BACKDROP = {
 }
 
 Style.WINDOW_BORDER_STYLES = {
-  { value = "shadow", label = "Soft shadow (default)" },
-  { value = "solid", label = "Solid color" },
+  { value = "solid", label = "Solid color (default)" },
+  { value = "shadow", label = "Soft shadow" },
   { value = "none", label = "None" },
 }
 
@@ -182,26 +173,71 @@ function Style:ApplyWindowBackground(frame, opacity)
   return bg
 end
 
+-- A backdrop edge can keep its default grey tint until the frame is touched
+-- on some clients. Dedicated textures take their color immediately and do
+-- not leave a phantom edge behind when borders are disabled.
+function Style:ApplyMeterBorder(frame, visible, r, g, b)
+  local edges = rawget(frame, "skadaBorderEdges")
+  if not visible then
+    if edges then
+      local i
+      for i = 1, table_getn(edges) do edges[i]:Hide() end
+    end
+    return
+  end
+
+  if not edges then
+    local top = frame:CreateTexture(nil, "BORDER")
+    top:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+    top:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+    top:SetHeight(1)
+
+    local bottom = frame:CreateTexture(nil, "BORDER")
+    bottom:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+    bottom:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+    bottom:SetHeight(1)
+
+    local left = frame:CreateTexture(nil, "BORDER")
+    left:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+    left:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+    left:SetWidth(1)
+
+    local right = frame:CreateTexture(nil, "BORDER")
+    right:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+    right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+    right:SetWidth(1)
+
+    edges = { top, bottom, left, right }
+    rawset(frame, "skadaBorderEdges", edges)
+    local i
+    for i = 1, table_getn(edges) do edges[i]:SetTexture(self.WHITE) end
+  end
+
+  local i
+  for i = 1, table_getn(edges) do
+    edges[i]:SetVertexColor(r, g, b)
+    edges[i]:SetAlpha(1)
+    edges[i]:Show()
+  end
+end
+
 function Style:ApplyMeterWindow(frame, active, opacity)
   local profile = Skada.db.profile
-  local borderStyle = profile.hideWindowBorder and "none" or profile.windowBorderStyle or "shadow"
+  local borderStyle = profile.hideWindowBorder and "none" or profile.windowBorderStyle or "solid"
   local hideBorder = borderStyle == "none"
   local color = profile.windowBorderColor or { 0.10, 0.11, 0.14 }
   local borderR, borderG, borderB = color[1] or 0.10, color[2] or 0.11, color[3] or 0.14
-  -- Solid is deliberately stable: selecting the window must not replace the
-  -- chosen edge color with the active-window highlight.
-  if active and borderStyle == "shadow" then
-    if profile.classColorMenus then
-      borderR, borderG, borderB = self:GetAccentColor()
-      borderR, borderG, borderB = borderR * 0.72, borderG * 0.72, borderB * 0.72
-    else
-      borderR, borderG, borderB = 0.28, 0.32, 0.40
-    end
+  -- The configured edge color is stable across selection changes. Only the
+  -- explicit class-colored chrome option is allowed to tint an active edge.
+  if active and borderStyle == "shadow" and profile.classColorMenus then
+    borderR, borderG, borderB = self:GetAccentColor()
+    borderR, borderG, borderB = borderR * 0.72, borderG * 0.72, borderB * 0.72
   end
-  frame:SetBackdrop(self.WINDOW_BORDER_BACKDROP)
-  frame:SetBackdropBorderColor(borderR, borderG, borderB, 1)
+  -- The fill and edge are textures of their own; clear any legacy backdrop
+  -- so its default grey edge cannot flash or survive a reload.
+  frame:SetBackdrop(nil)
+  self:ApplyMeterBorder(frame, not hideBorder, borderR, borderG, borderB)
   self:ApplyWindowBackground(frame, opacity or 0.9)
-  if hideBorder then frame:SetBackdropBorderColor(0, 0, 0, 0) end
   self:ApplyShadow(frame, borderStyle == "shadow")
 end
 

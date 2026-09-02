@@ -29,7 +29,7 @@ end
 function Options:SelectWindow(window)
   if not window then return end
   self.selectedWindow = window
-  Skada.UI:SetActive(window)
+  Skada.UI:SetActive(window, true)
   if self.frame then
     Shell.ShowPage(self, "window")
     Shell.UpdateTreeSelection(self)
@@ -70,7 +70,7 @@ end
 function Options:Open()
   if not Skada.initialized then return end
   if not self.frame then self:BuildPanel() end
-  self:GetCurrentWindow()
+  local window = self:GetCurrentWindow()
   Shell.RebuildTree(self)
   if not self.currentPage then
     self:OpenPage("general")
@@ -78,6 +78,7 @@ function Options:Open()
     self:OpenPage(self.currentPage)
   end
   Shell.RefreshPage(self)
+  if window then Skada.UI:SetActive(window, true) end
   self.frame:Show()
   Style:FadeIn(self.frame, 0.38, 0.13, 1)
 end

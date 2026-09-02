@@ -10,16 +10,16 @@ local getClickButton = Common.GetClickButton
 local getWheelDelta = Common.GetWheelDelta
 local Style = Skada.UIStyle
 
+local floor = math.floor
 local max = math.max
 local min = math.min
 local table_getn = table.getn
-
-local backdrop = Common.BACKDROP
 
 local setReadableFont = Common.SetFont
 
 local WindowConfig = Skada.WindowConfig
 local applyWindowDefaults = WindowConfig.ApplyDefaults
+local getVisibleRowCount = WindowConfig.GetVisibleRowCount
 
 local SnapDock = Skada.UISnapDock
 local persistGeometry = SnapDock.PersistGeometry
@@ -157,9 +157,9 @@ function UI:Scroll(direction)
     self.scrollOffset = 0
     return
   end
-  local page = self.db.rows
+  local page = getVisibleRowCount(self.db)
   local maximum = max(0, (self.displayCount or 0) - page)
-  local offset = self.scrollOffset or 0
+  local offset = floor(self.scrollOffset or 0)
   if direction > 0 then offset = offset - 1 else offset = offset + 1 end
   local clamped = min(maximum, max(0, offset))
   if clamped == self.scrollOffset then return end
@@ -205,7 +205,6 @@ function UI:InitializeWindow(config)
   local frame = CreateFrame("Button", "SkadaBarWindow" .. tostring(config.id), UIParent)
   self.frame = frame
   frame:SetFrameStrata("LOW")
-  frame:SetBackdrop(backdrop)
   Style:ApplyMeterWindow(frame, false, Style:GetWindowOpacity(config))
   frame:EnableMouseWheel(true)
   frame:SetScript("OnMouseWheel", function(_, delta)
@@ -406,16 +405,21 @@ function UI:GetWindow(value)
   end
 end
 
-function UI:SetActive(window)
+-- Logical activity chooses the target for commands and window actions.
+-- Settings passes showSelection=true to additionally draw editing chrome;
+-- ordinary meter interaction leaves that settings-only state untouched.
+function UI:SetActive(window, showSelection)
   if not window then return end
   self.activeWindow = window
-  self.visualActive = window
+  if showSelection ~= nil then
+    self.visualActive = showSelection and window or nil
+  end
   Skada.db.profile.selectedWindowID = window.db.id
   local i, candidate
   for i = 1, table_getn(self.windows) do
     candidate = self.windows[i]
     if candidate ~= window and candidate.actionMenu then candidate.actionMenu:Hide() end
-    Style:ApplyMeterWindow(candidate.frame, candidate == window, Style:GetWindowOpacity(candidate.db))
+    Style:ApplyMeterWindow(candidate.frame, candidate == self.visualActive, Style:GetWindowOpacity(candidate.db))
     Style:ApplyHeader(candidate)
   end
 end
@@ -447,9 +451,20 @@ function UI:CreateWindow(config)
     displayCount = 0,
   }, windowMeta)
   applyWindowDefaults(config, Skada.db.profile)
-  window:InitializeWindow(config)
-  self.windows[table_getn(self.windows) + 1] = window
+  -- Register before building: a client-only failure part way through
+  -- InitializeWindow must leave an editable (if rough) settings entry rather
+  -- than a visible frame the settings panel cannot see. The failure is
+  -- reported so the broken build is diagnosable from chat.
+  -- table.insert, not a getn-based append: the client's Lua 5.0 table.getn
+  -- trusts the size cache that table.remove maintains, and a manual append
+  -- after a delete made every later window invisible to getn-based loops
+  -- (the settings tree among them) while it kept rendering on screen.
+  table.insert(self.windows, window)
   self.byID[config.id] = window
+  local ok, message = pcall(window.InitializeWindow, window, config)
+  if not ok then
+    Skada:Print("Window " .. tostring(config.id) .. " failed to build: " .. tostring(message))
+  end
   return window
 end
 
@@ -469,7 +484,8 @@ function UI:CreateNew(name)
   config.y = (source and source.db.y or 0) - 28
   config.segment = Skada.Data.clientInCombat and "current" or "total"
   if Skada.Modes:Get(config.mode).live then config.segment = "current" end
-  profile.windows[table_getn(profile.windows) + 1] = config
+  -- see CreateWindow: a manual append desyncs from table.remove's size cache
+  table.insert(profile.windows, config)
   local window = self:CreateWindow(config)
   self:SetActive(window)
   Skada:MarkDirty()
@@ -484,6 +500,7 @@ function UI:DeleteWindow(window)
     return false
   end
   local i
+  local replaceVisualSelection = self.visualActive == window
   if window.actionMenu then window.actionMenu:Hide() end
   window.frame:Hide()
   self.byID[window.db.id] = nil
@@ -497,7 +514,7 @@ function UI:DeleteWindow(window)
     end
   end
   self.activeWindow = self:GetPrimary()
-  self:SetActive(self.activeWindow)
+  self:SetActive(self.activeWindow, replaceVisualSelection and true or nil)
   self:SyncLegacy(self:GetPrimary())
   Skada:MarkDirty()
   Skada:Print("Removed window " .. tostring(window.db.id) .. ".")
@@ -636,6 +653,8 @@ function UI:Initialize()
     if config.id == profile.selectedWindowID then self.activeWindow = window end
   end
   profile.nextWindowID = max(profile.nextWindowID or 1, highest + 1)
+  -- Restore the logical target without making the meter look selected for
+  -- editing. Visual selection belongs exclusively to the settings window.
   self:SetActive(self.activeWindow or self:GetPrimary())
   self:OnCombatState(Skada.Data.clientInCombat)
   self:RefreshAll()

@@ -2,6 +2,47 @@
 
 All notable changes to the PMP Skada rewrite are documented here.
 
+## 1.2.1 - 2026-09-02
+
+### Changed
+
+- Bordered windows now default to a plain configured-color edge instead of
+  the grey outer glow. Existing bordered profiles migrate to solid color;
+  soft shadow remains available as an explicit style.
+
+### Fixed
+
+- Mode and fight lists no longer turn blank at the bottom when snap-size has
+  preserved the window height as a fractional row count.
+- Windows whose height came from a snap-size match or an off-grid resize no
+  longer show only their whole rows with an empty band underneath: the
+  fractional remainder now paints as a short trailing bar, so the window
+  fills to its bottom edge and snapped windows keep their flush alignment.
+- The configured window-border color now applies immediately and remains
+  stable when a window becomes active; class tinting remains opt-in.
+- Borderless windows now remove their backdrop edge instead of making it
+  transparent, avoiding a phantom border on clients that ignore edge alpha.
+- Meter windows no longer load with phantom settings-selection chrome after
+  login or UI reload; selection chrome now appears only while settings are open.
+- Window synchronization no longer downgrades the profile migration version
+  and reapplies the default border style on every login or UI reload.
+- Colored window edges now use dedicated textures, avoiding clients that show
+  a grey backdrop edge until the settings window forces another repaint.
+- Meter borders are consistently one pixel wide on all four sides, including
+  the top edge of the primary window.
+- A window whose construction failed part way through no longer appears on
+  screen while missing from the settings window list. New windows now
+  register before they are built, and a failed build is reported in chat.
+- Windows created after deleting one now appear in the settings window list.
+  The client's Lua 5.0 table.getn trusts an internal size cache maintained
+  by table.remove; a manual append after a delete desynced from that cache
+  and hid every later window from getn-based iteration.
+- Wiping fight data also resets the client's cached array length for the
+  fight history, which wiping alone leaves stale under the same mechanism.
+- The settings tree now follows auto-renames immediately: switching a
+  window's mode from the meter or through a combat mode switch used to
+  leave the tree showing the old name until the panel was reopened.
+
 ## 1.2.0 - 2026-09-02
 
 ### Added

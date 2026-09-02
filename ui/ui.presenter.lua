@@ -4,6 +4,7 @@ local Presenter = {}
 Skada.UIPresenter = Presenter
 
 local Common = Skada.Common
+local getVisibleRowCount = Skada.WindowConfig.GetVisibleRowCount
 
 local pairs = pairs
 local floor = math.floor
@@ -67,7 +68,7 @@ function Presenter:BuildThreatDisplay()
   local rows = Skada.Threat and Skada.Threat.rows
   if not rows then return 0 end
   local rowCount = table_getn(rows)
-  local visible = self.db and self.db.rows or rowCount
+  local visible = self.db and getVisibleRowCount(self.db) or rowCount
   if visible > rowCount then visible = rowCount end
 
   local playerName = UnitName and UnitName("player") or nil

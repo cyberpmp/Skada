@@ -1,7 +1,54 @@
 -- WoW API stubs executed before the addon loads. Verbatim port of the former
 -- STUBS block in tests/run_tests.py; harness.py executes this before Skada.toc.
 
-table.getn = table.getn or function(value) return #value end
+-- The OctoWoW client is Lua 5.0, where table.getn trusts the out-of-band size
+-- cache that table.insert/table.remove maintain (luaL_getn/luaL_setn in Lua
+-- 5.0's lauxlib.c) ahead of the actual border. Manual appends bypass the
+-- cache, so mixing `t[getn(t) + 1] = v` with table.remove silently truncates
+-- getn's view of the list. Emulate that faithfully instead of letting Lua 5.4's
+-- `#` mask it; see the create-after-delete regression in the options suite.
+do
+  local sizes = setmetatable({}, { __mode = "k" })
+  local function checkint(value)
+    if type(value) == "number" and math.floor(value) == value and value >= 0 then return value end
+    return nil
+  end
+  table.getn = function(t)
+    local n = checkint(rawget(t, "n"))
+    if n then return n end
+    n = sizes[t]
+    if n then return n end
+    local i = 1
+    while t[i] ~= nil do i = i + 1 end
+    return i - 1
+  end
+  local function setn(t, n)
+    if checkint(rawget(t, "n")) then rawset(t, "n", n) else sizes[t] = n end
+  end
+  table.setn = setn
+  table.insert = function(t, first, second)
+    if second == nil then
+      local n = table.getn(t)
+      t[n + 1] = first
+      setn(t, n + 1)
+    else
+      local n = table.getn(t)
+      for j = n, first, -1 do t[j + 1] = t[j] end
+      t[first] = second
+      setn(t, n + 1)
+    end
+  end
+  table.remove = function(t, index)
+    local n = table.getn(t)
+    index = index or n
+    local removed = t[index]
+    local j
+    for j = index, n - 1 do t[j] = t[j + 1] end
+    t[n] = nil
+    setn(t, n - 1)
+    return removed
+  end
+end
 table.wipe = table.wipe or function(value) for key in pairs(value) do value[key] = nil end end
 
 TestDropdownInfos = {}
@@ -115,6 +162,7 @@ function objectMethods:SetText(value) self.textValue = value end
 function objectMethods:SetTextColor(r, g, b, a)
   self.textR, self.textG, self.textB, self.textA = r, g, b, a
 end
+function objectMethods:SetBackdrop(value) self.backdrop = value end
 function objectMethods:SetBackdropColor(r, g, b, a)
   self.backdropR, self.backdropG, self.backdropB, self.backdropA = r, g, b, a
 end
