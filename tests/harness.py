@@ -34,6 +34,8 @@ LOCAL_RE = re.compile(r"\blocal\s+([a-z]+_[a-z]+)\b")
 
 def lint_upvalue_aliases():
     for filename in toc_load_list():
+        if filename.startswith("libs/"):
+            continue  # vendored third-party code; not ours to lint
         source = (ROOT / filename).read_text(encoding="utf-8")
         declared = set(LOCAL_RE.findall(source))
         for name in set(ALIAS_RE.findall(source)):
@@ -41,6 +43,21 @@ def lint_upvalue_aliases():
                 f"{filename}: {name} used but never declared with "
                 f"'local {name} = <module>.<fn>'"
             )
+
+
+def lint_script_hooks():
+    """The client's HookScript runs the original handler without its
+    positional arguments (AceGUI's sizer handler died on a nil frame in game
+    and the dialog stayed glued to the mouse); Skada chains scripts through
+    SkadaCompat.AppendScript instead."""
+    for filename in toc_load_list():
+        if filename.startswith("libs/"):
+            continue
+        source = (ROOT / filename).read_text(encoding="utf-8")
+        assert ":HookScript(" not in source, (
+            f"{filename}: use SkadaCompat.AppendScript; the client's HookScript "
+            f"drops the original handler's arguments"
+        )
 
 
 def load_addon():
@@ -52,11 +69,26 @@ def load_addon():
     """
     lua = LuaRuntime(unpack_returned_tuples=True)
     lua.execute(STUBS_PATH.read_text(encoding="utf-8"))
-    lua.execute("string.match = nil")
     loadfile = lua.globals().loadfile
-    for filename in toc_load_list():
+    files = toc_load_list()
+    # Load in exact .toc order. string.match is nilled right after
+    # core/core.compat.lua: Skada's own hand-written files keep the
+    # vanilla-Lua-5.0-purity guard that catches accidental Lua-5.1-only
+    # stdlib usage (the compat layer itself is exempt — its probe/repair
+    # code is about string.match, not a user of it). (When the vendored
+    # Ace3 stack under libs/ still existed, the nil point was right after
+    # the last libs/ file instead, since that code needed
+    # string.match/split/trim present.)
+    match_nil_after_index = next(
+        (index for index, filename in enumerate(files)
+         if filename == "core/core.compat.lua"),
+        None,
+    )
+    for index, filename in enumerate(files):
         chunk = loadfile(str(ROOT / filename))
         chunk()
+        if index == match_nil_after_index:
+            lua.execute("string.match = nil")
     namespace = lua.globals().Skada
     namespace.Initialize(namespace)
     return lua, namespace

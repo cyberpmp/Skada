@@ -116,3 +116,18 @@ def run(ctx: Context):
     assert alice.deaths == 1, alice.deaths
     death = alice.deathLog["death1"]
     assert death.customText == "Killed by Boar (Auto Attack)", death.customText
+
+    ctx.run('''
+      -- CycleSegment wipes cycleValues and refills it; under the client's
+      -- Lua 5.0 size cache a positional refill would pin table.getn at 0 and
+      -- segment cycling would never leave the first choice.
+      Skada.db.profile.segment = "current"
+      Skada.Data:CycleSegment(1, nil)
+      assert(Skada.db.profile.segment == "total",
+        "segment cycling did not advance past the first choice: " ..
+        tostring(Skada.db.profile.segment))
+      Skada.Data:CycleSegment(-1, nil)
+      assert(Skada.db.profile.segment == "current",
+        "segment cycling did not step back to the first choice: " ..
+        tostring(Skada.db.profile.segment))
+    ''')

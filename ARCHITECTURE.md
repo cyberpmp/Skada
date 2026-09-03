@@ -23,7 +23,7 @@ Skada/
 |-- combat/     Combat-text parser and routing
 |-- modes/      Meter-mode projections
 |-- ui/         Window presentation, rendering, reporting, and docking
-|-- options/    Settings schema, widgets, shell, and minimap entry point
+|-- options/    Settings schema, dialog and control renderers, and minimap entry point
 |-- commands/   Slash-command entry points
 |-- media/      Bundled fonts and textures
 |-- tests/      Host-side test suite: harness, stubs, and ordered domain suites
@@ -38,13 +38,13 @@ ownership clear in search results while preserving explicit TOC ordering.
 
 | Layer | Modules | Responsibility |
 | --- | --- | --- |
-| Foundation | `core/core.common.lua`, `core/core.defaults.lua`, `core/core.runtime.lua`, `ui/ui.style.lua` | Compatibility helpers, profile defaults, lifecycle, events, tickers, internal messages, rendering policy, and shared visuals |
+| Foundation | `core/core.compat.lua`, `core/core.common.lua`, `core/core.defaults.lua`, `core/core.runtime.lua`, `ui/ui.style.lua` | Client-gap shims and stdlib repairs, compatibility helpers, profile defaults, lifecycle, events, tickers, internal messages, rendering policy, and shared visuals |
 | Identity and data | `data/data.identity.lua`, `data/data.aggregator.lua`, `data/data.boss.lua`, `data/data.segments.lua`, `data/data.navigation.lua`, `data/data.lua`, `data/data.reset.lua` | Roster and pet ownership, aggregate mutation, boss recognition, segment lifecycle, history navigation, the data facade, and reset policies |
 | Threat | `threat/threat.estimate.lua`, `threat/threat.lua` | Combat-scoped local estimates and the authoritative OctoWoW Threat API v4 provider |
 | Enrichment | `tracking/tracking.spells.lua`, `tracking/tracking.casts.lua`, `tracking/tracking.auras.lua`, `tracking/tracking.damage.lua`, `tracking/tracking.group.lua`, `tracking/tracking.lua` | Spell metadata, cast correlation, dispels, interrupts, aura uptime, last-hit evidence, and group observation |
 | Parsing and projection | `combat/combat.parser.lua`, `modes/modes.lua` | Combat-text routing and projection of aggregates into meter modes |
 | Window UI | `ui/ui.config.lua`, `ui/ui.presenter.lua`, `ui/ui.rows.lua`, `ui/ui.snap.lua`, `ui/ui.report.lua`, `ui/ui.lua` | Per-window persistence, display models, pooled row rendering, snapping, reporting, and window composition |
-| Settings and entry points | `options/options.widgets.lua`, `options/options.schema.lua`, `options/options.shell.lua`, `options/options.minimap.lua`, `options/options.lua`, `commands/commands.lua` | Native controls, declarative settings, panel shell, minimap access, settings facade, and slash commands |
+| Settings and entry points | `options/options.schema.lua`, `options/options.controls.lua`, `options/options.dialog.lua`, `options/options.minimap.lua`, `options/options.lua`, `commands/commands.lua` | Declarative options table, control renderers, the settings dialog itself, minimap access, the settings facade, and slash commands |
 
 Modules loaded later may reference tables created earlier. Event callbacks
 resolve cross-module state at call time so initialization remains ordered and
@@ -55,7 +55,10 @@ explicit.
 1. `combat/combat.parser.lua` compiles client combat formats once and routes
    only the chat events on which each format can occur.
 2. Tracking services enrich sparse text with spell IDs, GUIDs, aura sources,
-   dispel snapshots, interrupt casts, and last-hit evidence.
+   dispel snapshots, interrupt casts, and last-hit evidence. Ambient aura events
+   coalesce into a bounded queue that scans one unit per tracking tick; segment
+   start queues only unseen group, target, and focus units instead of
+   synchronously enumerating a full roster on the pull path.
 3. `data/data.lua` normalizes accepted facts and delegates mutations to
    `data/data.aggregator.lua` for both Current and Overall sets.
 4. `modes/modes.lua` projects actor and detail fields without mutating the
@@ -83,6 +86,7 @@ Internal messages are synchronous and registration-order dependent:
 | Message | Publisher | Consumers |
 | --- | --- | --- |
 | `combatStateChanged(inCombat)` | Segment state machine | Window auto-switching and threat-estimate lifecycle |
+| `segmentStarted(segment, now)` | Segment state machine | Queue unseen aura baselines |
 | `segmentArchived(data, segment)` | Segment state machine | Numeric history-selection migration |
 | `dataReset()` | Data facade | Window view reset and threat-estimate reset |
 | `damageRecorded(...)` | Data facade | Local threat estimator |
@@ -119,7 +123,10 @@ Healing retains three distinct values:
 
 - combat-message total (`healing`);
 - estimated effective amount (`effectiveHealing`);
-- estimated overheal (`overhealing`).
+- estimated overheal (`overhealing`), which the healing modes also draw as a
+  dimmer continuation of the bar past the effective fill (a mode's
+  `extraField`; `entry.extra` on display rows, `row.extra` texture placed by
+  arithmetic from the row width, bar scale = max of value + extra).
 
 Amounts without a readable health snapshot also increment
 `unverifiedHealing`. Callers must not relabel these estimates as exact values.
@@ -140,16 +147,19 @@ and must never fail the event handler.
 
 ### Rendering
 
-Core tickers run independently of display rebuilding. A full rebuild occurs at
-the configured refresh interval when data is dirty or a visible live view needs
-updates. Bar easing may continue between rebuilds without sorting, formatting,
-or allocating display entries.
+Core tickers run independently of display rebuilding and are scanned only when
+the shortest registered ticker interval is due. A full rebuild occurs at a
+fixed 250 ms cadence when data is dirty or a visible time-dependent view needs
+clock updates. Raw-value views remain idle during quiet combat. Bars always
+ease at fixed speed 5 between rebuilds without sorting, formatting, allocating
+display entries, or reading the clock; only windows with visible movement are
+visited.
 
 Three signals remain separate:
 
 - `Skada.dirty` requests content reconstruction.
 - `window.layoutDirty` requests geometry and typography updates.
-- `UI.animateUntil` keeps one-off easing active briefly after a rebuild.
+- `UI.hasActiveAnimations` keeps easing active until subpixel movement ends.
 
 Hidden windows do not request continuous rendering.
 
@@ -165,14 +175,102 @@ settings that intentionally apply to every window remain on the global profile.
 
 ### Settings
 
-`options/options.schema.lua` describes pages and rows as data.
-`options/options.widgets.lua` creates native controls,
-`options/options.shell.lua` owns panel navigation and scrolling, and
-`options/options.lua` owns selection and the page cache.
+The settings dialog is Skada's own (`options/options.dialog.lua` for the
+chrome, sidebar and pane, `options/options.controls.lua` for the control
+renderers), built directly on this client's frame APIs — no widget library.
+It replaced the vendored Ace3 stack under `libs/` (now deleted), whose every
+rendering symptom here — blank EditBox values, an unscrolling scroll frame,
+strata/level inversions, single-column panes — was a repair job in
+`core/core.compat.lua`. Two design decisions bury the worst bug classes at
+the root: sliders have NO value EditBox (the value lives in a plain
+FontString, which cannot come up blank), and the dialog's layout is pure
+arithmetic (nothing reads a rendered rect, so there is no reflow and a
+control is laid out correctly the first time it is built).
 
-Rows must derive their state from `get` functions during `refresh`; cached rows
-must not retain a particular window. Per-window setters resolve the currently
-selected window at invocation time.
+`core/core.compat.lua` still loads first and fills in or repairs globals
+this client lacks or other addons break (`string.match` is probed and
+replaced when RollFor has clobbered it, `string.split`, the length-tracking
+`table.*` functions, `table.sort`) and wraps `CreateFrame` so that
+`GetWidth`/`GetHeight` report an explicit size while the client's rect still
+reads 0 (the client only computes anchor-derived rects at render time, and
+any layout that sizes a child from such a read synchronously would inherit
+width 0). The wrapper's remaining fixes stay `.obj`-gated so BigDebuffs'
+own bundled Ace3 keeps benefiting from them: an explicit size wins outright
+and a rendered rect is divided by the effective scale for AceGUI frames (the
+client reports anchor-derived rects in screen units, which fed back through
+its Fill layout shrank the pane on every rebuild), TreeGroup's
+`OptionsListButtonTemplate` rows are built from scratch (the client's
+template OnLoad never populates the `.toggle`/`.text` fields TreeGroup
+indexes), and `SetParent` re-derives the moved frame's strata and frame
+level from its new parent, subtree included
+(`SkadaCompat.InheritLayering`) — the client leaves both untouched on
+reparenting. The same gap applies to Blizzard's shared `ColorPickerFrame`:
+the compat layer hooks its OnShow to carry its layering down to its
+Okay/Cancel children (toplevel off while shown, restored on hide).
+
+The dialog root is a fixed 769×560 frame at HIGH strata — above the meter
+windows (LOW) and the normal UI (MEDIUM), below DIALOG where the StaticPopup
+confirmations for delete/reset live — not toplevel, `SkadaCompat.FixLevels`
+applied after every build. The sidebar is a plain frame whose rows are built
+from scratch (175×18 buttons with the quest-log highlight, an accent marker
+on the selected row): a General row, a mouse-disabled Windows header whose
+right edge carries the plus button that creates a window
+(`Skada.UI:CreateNew()` then `Options:SelectWindow`), and one indented row
+per meter window. The pane is a NAMED ScrollFrame from
+`UIPanelScrollFrameTemplate` — the template's own `<name>ScrollBar` drives
+clipping and the scroll range natively, the mouse wheel is wired by hand
+(the template omits it here) — with an explicit-size, anchorless scroll
+child re-handed over via `SetScrollChild` after every height change plus
+`UpdateScrollChildRect` (the client fixes the scroll range at SetScrollChild
+time). Frame scripts are chained through `SkadaCompat.AppendScript`, never
+`HookScript`: the client's HookScript runs the original handler without its
+positional arguments, and the harness lints Skada's own files for it.
+
+`options/options.controls.lua` renders the eight leaf types the schema
+emits, one frame per spec, each carrying a back-reference to its spec:
+
+- **toggle/select/color** — flat buttons; the select opens a Skada-owned
+  popup menu (modeled on the report action menu) parented to the dialog
+  root at DIALOG strata so the scroll child's clipping cannot cut it off;
+- **range** — a from-scratch Slider frame (1.12 has no slider template)
+  using the backdrop/thumb texture recipe proven in game, with the current
+  value shown as a plain text label under the track and a `setup`
+  re-entrancy flag around programmatic `SetValue` (the real client fires
+  OnValueChanged for every programmatic SetValue);
+- **color** — a swatch button configuring Blizzard's shared
+  `ColorPickerFrame`, level-bumped above the dialog and re-layered through
+  the compat hook before `Show()`;
+- **input** — the one remaining EditBox (the window name). Text is NEVER
+  set at build time: the value is queued and a one-shot plain-Frame driver
+  applies it once a render pass has placed the box (`GetLeft` answers
+  non-nil; OnUpdate does not fire on EditBox frames here, and the dialog's
+  arithmetic layout never reflows, so one placement suffices). Enter
+  commits, Escape reverts to the last committed value;
+- **execute/header** — a full-width action button (routed through
+  StaticPopup confirmations) and a gold heading with a hairline rule.
+
+`options/options.schema.lua` builds the whole options table fresh on every
+call to `Schema:BuildOptions()` — a root group with a `general` group (every
+global-profile row) and a `windows` group. The `windows` group's `args`
+holds one nested group per meter window, keyed `window_<id>`, and nothing
+else; each window's own group is built by `Schema:BuildWindowArgs(window)`,
+whose `get`/`set` closures capture that specific `window` directly — there
+is no shared "currently selected window" for these to resolve, since every
+window's subgroup is rebuilt per pane. In the sidebar the Windows node is a
+header rather than a page. `options/options.lua` is the public API other
+code calls (`Open`/`Close`/`Toggle`/`SelectWindow`/`CycleWindow`/`Refresh`)
+plus `selectedWindow` (which window's border is highlighted on screen and
+which pane `SelectWindow`/`CycleWindow` navigate to) and the minimap
+button.
+
+Whenever the window list changes, a window is renamed, or a mode switch
+auto-renames a window, call `Schema:NotifyChanged()`, which funnels into
+`Options:Refresh()` — a no-op while the dialog is closed (Open rebuilds
+everything anyway) and a sidebar+pane rebuild while it is open.
+`windowListChanged` also calls `Options:GetCurrentWindow()`, whose self-heal
+(falls back to `Skada.UI:GetActive()` when `selectedWindow` no longer
+resolves in `Skada.UI.byID`) is what makes the panel recover after the
+selected window is deleted.
 
 ## Extending the addon
 
@@ -218,6 +316,9 @@ created by earlier ones — so the order in the orchestrator's `SUITES` list is
 part of the contract.
 
 The test loader parses `Skada.toc`, so a missing file or load-order regression
-fails before behavioral assertions run. It also forces the Lua 5.0
-`string.match` compatibility path and checks locally aliased standard-library
+fails before behavioral assertions run. It also reproduces RollFor's
+captures-only `string.match` clobber before the addon loads, so the
+probe-and-replace in `core/core.compat.lua` is exercised as it is in game,
+nils `string.match` right after `core/core.compat.lua` loads so Skada's own
+files stay Lua 5.0 pure, and checks locally aliased standard-library
 functions used by runtime modules.

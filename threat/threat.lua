@@ -22,6 +22,7 @@ local wipeTable = Common.Wipe
 local pairs = pairs
 local tonumber = tonumber
 local table_getn = table.getn
+local table_insert = table.insert
 local table_sort = table.sort
 local string_find = string.find
 
@@ -40,8 +41,18 @@ function Threat:IsGrouped()
   return raidSize > 0 or partySize > 0
 end
 
-function Threat:SetWindowEnumerator(fn)
-  self.windowEnumerator = fn
+function Threat:IsSelfOrOwnPet(name)
+  if not Skada.Data then return false end
+  local playerName = Skada.Data:GetPlayerName()
+  if not playerName then return false end
+  if name == playerName then return true end
+  local identity = Skada.Data:GetIdentityByName(name)
+  if not identity then return false end
+  return identity.owner == playerName
+end
+
+function Threat:SetWindowEnumerator(enumerator)
+  self.windowEnumerator = enumerator
 end
 
 function Threat:GetChannel()
@@ -67,8 +78,7 @@ end
 
 function Threat:ClearRows(clearSamples)
   local hadRows = table_getn(self.rows) > 0
-  local i
-  for i = 1, table_getn(self.rows) do self.rows[i] = nil end
+  wipeTable(self.rows)
   if clearSamples then wipeTable(self.rowsByName) end
   if hadRows then Skada:MarkDirty() end
 end
@@ -76,8 +86,8 @@ end
 function Threat:TargetChanged()
   local targetName = self:GetTargetName(false)
   local targetKey = self:GetTargetKey(targetName)
+  local now = GetTime and GetTime() or 0
   if targetKey ~= self.targetKey then
-    local now = GetTime and GetTime() or 0
     self.targetName = targetName
     self.targetKey = targetKey
     self.requestTarget = nil
@@ -93,7 +103,7 @@ function Threat:TargetChanged()
   end
   Skada:MarkDirty()
 
-  if self:NeedsUpdates() then self:Update(GetTime()) end
+  if self:NeedsUpdates(now) then self:Update(now) end
 end
 
 function Threat:GroupChanged()
@@ -104,23 +114,33 @@ function Threat:GroupChanged()
   self.serverWaitSince = GetTime()
   self.usingEstimate = false
   self:ClearRows(true)
+  local estimator = Skada.ThreatEstimate
+  if estimator then
+    estimator:PruneActors(function(actorName)
+      if self:IsSelfOrOwnPet(actorName) then return true end
+      local identity = Skada.Data and Skada.Data:GetIdentityByName(actorName)
+      return identity ~= nil and identity ~= false
+    end)
+  end
   self:TargetChanged()
 end
 
-function Threat:NeedsUpdates()
-  local windows = self.windowEnumerator and self.windowEnumerator()
-  if not windows then return false end
-  local i, window, wanted
-  for i = 1, table_getn(windows) do
-    window = windows[i]
-    if window.db.visible and window.db.mode == "threat" and window.view == "mode" then
-      wanted = true
-      break
+function Threat:NeedsUpdates(now, wanted)
+  if wanted == nil then
+    local windows = self.windowEnumerator and self.windowEnumerator()
+    if not windows then return false end
+    local windowIndex, window
+    for windowIndex = 1, table_getn(windows) do
+      window = windows[windowIndex]
+      if not window.broken and window.db.visible and window.db.mode == "threat" and window.view == "mode" then
+        wanted = true
+        break
+      end
     end
   end
   if not wanted then return false end
 
-  local now = GetTime()
+  now = now or GetTime()
   if self.lastResponse and now - self.lastResponse <= self.staleAfter then return true end
   if self.burstUntil and now < self.burstUntil then return true end
   return self:GetTargetName(true) ~= nil
@@ -134,47 +154,48 @@ function Threat:ApplyEstimate(now, targetName, targetKey)
   local entries, count = estimator:Build(targetName, targetKey, self.estimateRows)
   if count == 0 then return false end
 
-  local previousCount = table_getn(self.rows)
-  local name, row, source, i
+  local ungrouped = not self:IsGrouped()
+  local name, row, source, entryIndex
   for name, row in pairs(self.rowsByName) do row.seen = false end
+  wipeTable(self.rows)
 
-  for i = 1, count do
-    source = entries[i]
+  for entryIndex = 1, count do
+    source = entries[entryIndex]
     name = source.name
-    row = self.rowsByName[name]
-    if not row then
-      row = { name = name }
-      self.rowsByName[name] = row
-    end
-    if not row.estimated then
-      row.tps = nil
-      row.lastSeen = nil
-    end
-    if row.threat ~= nil and row.lastSeen and now > row.lastSeen then
-      local delta = source.threat - row.threat
-      if delta < 0 then
-        row.tps = 0
-      else
-        local instantaneous = delta / (now - row.lastSeen)
-        row.tps = row.tps and (row.tps * 0.65 + instantaneous * 0.35) or instantaneous
+    if not ungrouped or self:IsSelfOrOwnPet(name) then
+      row = self.rowsByName[name]
+      if not row then
+        row = { name = name }
+        self.rowsByName[name] = row
       end
+      if not row.estimated then
+        row.tps = nil
+        row.lastSeen = nil
+      end
+      if row.threat ~= nil and row.lastSeen and now > row.lastSeen then
+        local delta = source.threat - row.threat
+        if delta < 0 then
+          row.tps = 0
+        else
+          local instantaneous = delta / (now - row.lastSeen)
+          row.tps = row.tps and (row.tps * 0.65 + instantaneous * 0.35) or instantaneous
+        end
+      end
+      row.threat = source.threat
+      row.percent = source.percent
+      row.tank = source.tank
+      row.melee = source.melee
+      row.class = source.class or "OTHER"
+      row.estimated = true
+      row.lastSeen = now
+      row.seen = true
+      table_insert(self.rows, row)
     end
-    row.threat = source.threat
-    row.percent = source.percent
-    row.tank = source.tank
-    row.melee = source.melee
-    row.class = source.class or "OTHER"
-    row.estimated = true
-    row.lastSeen = now
-    row.seen = true
-    self.rows[i] = row
   end
 
   for name, row in pairs(self.rowsByName) do
     if not row.seen then self.rowsByName[name] = nil end
   end
-  for i = count + 1, previousCount do self.rows[i] = nil end
-  table_sort(self.rows, sortRows)
   self.lastResponse = now
   self.usingEstimate = true
   Skada:MarkDirty()
@@ -182,7 +203,7 @@ function Threat:ApplyEstimate(now, targetName, targetKey)
 end
 
 function Threat:Update(now)
-  if not self:NeedsUpdates() then return end
+  if not self:NeedsUpdates(now) then return end
 
   local targetName = self:GetTargetName(true)
 
@@ -221,7 +242,7 @@ function Threat:Update(now)
     self:ClearRows(true)
   end
 
-  if not SendAddonMessage or now < (self.nextQuery or 0) then return end
+  if not SendAddonMessage or not self:IsGrouped() or now < (self.nextQuery or 0) then return end
   local interval = (self.burstUntil and now < self.burstUntil) and self.burstInterval or self.queryInterval
   self.nextQuery = now + interval
   self.requestTarget = targetKey
@@ -246,13 +267,13 @@ function Threat:OnAddonMessage(eventName, prefix, message)
   local tankPacketAt = string_find(payload, "#", 1, true)
   if tankPacketAt then payload = string_sub(payload, 1, tankPacketAt - 1) end
 
-  local previousCount = table_getn(self.rows)
   local now = GetTime()
+  local ungrouped = not self:IsGrouped()
 
   local name, row
   for name, row in pairs(self.rowsByName) do row.seen = false end
+  wipeTable(self.rows)
 
-  local count = 0
   local record, tankFlag, threatValue, percentValue, meleeFlag
   local identity
   for record in string_gmatch(payload, "([^;]+)") do
@@ -260,7 +281,8 @@ function Threat:OnAddonMessage(eventName, prefix, message)
       string_match(record, "^([^:]+):([^:]*):([^:]*):([^:]*):([^:]*)")
     threatValue = tonumber(threatValue)
     percentValue = tonumber(percentValue)
-    if name and threatValue and percentValue then
+    if name and threatValue and percentValue
+      and (not ungrouped or self:IsSelfOrOwnPet(name)) then
       row = self.rowsByName[name]
       if not row then
         row = { name = name }
@@ -289,8 +311,7 @@ function Threat:OnAddonMessage(eventName, prefix, message)
       row.class = identity and identity.class or "OTHER"
       if not row.seen then
         row.seen = true
-        count = count + 1
-        self.rows[count] = row
+        table_insert(self.rows, row)
       end
     end
   end
@@ -302,12 +323,9 @@ function Threat:OnAddonMessage(eventName, prefix, message)
   end
   for name, row in pairs(self.rowsByName) do
     if not row.seen then
-      count = count + 1
-      self.rows[count] = row
+      table_insert(self.rows, row)
     end
   end
-  local i
-  for i = count + 1, previousCount do self.rows[i] = nil end
 
   table_sort(self.rows, sortRows)
   self.lastResponse = now

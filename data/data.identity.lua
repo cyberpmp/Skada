@@ -8,8 +8,10 @@ local wipeTable = Common.Wipe
 local trim = Common.Trim
 
 local string_match = Common.Match
+local pairs = pairs
 
 local table_getn = table.getn
+local table_insert = table.insert
 
 local commonUnitCandidates = { "target", "targettarget", "focus", "focustarget", "mouseover" }
 
@@ -31,7 +33,17 @@ function DataIdentity:AddObservedUnit(unit, interesting, ownerName)
   identity.class = class ~= "OTHER" and class or identity.class or "OTHER"
   identity.unit = unit
   identity.owner = ownerName or identity.owner
-  if interesting then identity.interesting = true end
+  if interesting then
+    local becameInteresting = not identity.interesting
+    identity.interesting = true
+    if becameInteresting then
+      for cachedName, cachedIdentity in pairs(self.identitiesByName) do
+        if cachedIdentity == false then
+          self.identitiesByName[cachedName] = nil
+        end
+      end
+    end
+  end
 
   self.unitsByName[name] = unit
   if guid then self.identitiesByGUID[guid] = identity end
@@ -42,7 +54,7 @@ function DataIdentity:AddGroupUnit(unit)
   if not unit or not UnitExists(unit) then return end
   local identity = self:AddObservedUnit(unit, true)
   if not identity then return end
-  self.groupTokens[table_getn(self.groupTokens) + 1] = unit
+  table_insert(self.groupTokens, unit)
 
   local petUnit
   if unit == "player" then
@@ -57,7 +69,7 @@ function DataIdentity:AddGroupUnit(unit)
   if UnitExists(petUnit) then
     local petIdentity = self:AddObservedUnit(petUnit, true, identity.name)
     if petIdentity then
-      self.groupTokens[table_getn(self.groupTokens) + 1] = petUnit
+      table_insert(self.groupTokens, petUnit)
     end
   end
 end
@@ -72,11 +84,11 @@ function DataIdentity:RebuildRoster()
 
   local raidCount = GetNumRaidMembers and GetNumRaidMembers() or 0
   local partyCount = GetNumPartyMembers and GetNumPartyMembers() or 0
-  local i
+  local unitIndex
   if raidCount > 0 then
-    for i = 1, raidCount do self:AddGroupUnit("raid" .. i) end
+    for unitIndex = 1, raidCount do self:AddGroupUnit("raid" .. unitIndex) end
   else
-    for i = 1, partyCount do self:AddGroupUnit("party" .. i) end
+    for unitIndex = 1, partyCount do self:AddGroupUnit("party" .. unitIndex) end
   end
 
   self.playerName = UnitName("player") or self.playerName or "Player"
@@ -94,9 +106,9 @@ function DataIdentity:FindUnitByName(name)
   local unit = self.unitsByName[name]
   if unit and UnitExists(unit) and UnitName(unit) == name then return unit end
 
-  local i
-  for i = 1, table_getn(commonUnitCandidates) do
-    unit = commonUnitCandidates[i]
+  local candidateIndex
+  for candidateIndex = 1, table_getn(commonUnitCandidates) do
+    unit = commonUnitCandidates[candidateIndex]
     if UnitExists(unit) and UnitName(unit) == name then
       self:AddObservedUnit(unit, false)
       return unit
@@ -119,12 +131,24 @@ function DataIdentity:ResolveSource(name)
   end
 
   local identity = self.identitiesByName[name]
+  local trackAll = Skada.db.profile.trackAll
+  if identity == false then
+    if not trackAll then return end
+    identity = { name = name, class = "OTHER" }
+    self.identitiesByName[name] = identity
+  end
   if not identity then
     local owner = string_match(name, "%((.-)%)$")
     local ownerIdentity = owner and self.identitiesByName[owner]
     if ownerIdentity and ownerIdentity.interesting then
       identity = { name = name, owner = owner, class = "OTHER", interesting = true }
       self.identitiesByName[name] = identity
+    elseif trackAll then
+      identity = { name = name, class = "OTHER" }
+      self.identitiesByName[name] = identity
+    else
+      self.identitiesByName[name] = false
+      return
     end
   end
 
@@ -136,11 +160,7 @@ function DataIdentity:ResolveSource(name)
     return name, identity
   end
 
-  if Skada.db.profile.trackAll then
-    if not identity then
-      identity = { name = name, class = "OTHER" }
-      self.identitiesByName[name] = identity
-    end
+  if trackAll then
     return name, identity
   end
 end
@@ -151,7 +171,8 @@ function DataIdentity:ResolveTarget(name)
     name = self.playerName
   end
   local identity = self.identitiesByName[name]
-  if identity and identity.interesting then return name, identity end
+  if identity and identity.interesting then return name, identity, name end
+  return nil, nil, name
 end
 
 local function handleRosterChanged()

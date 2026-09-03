@@ -128,11 +128,16 @@ def run(ctx: Context):
         visualVersion = 4,
         hideWindowBorder = false,
         windowBorderStyle = "shadow",
+        updateRate = 0.1,
+        smoothBars = false,
+        barSpeed = 1,
         windows = {},
       }
       Skada.WindowConfig.Migrate(bordered)
       assert(bordered.visualVersion == 5 and bordered.windowBorderStyle == "solid",
         "existing bordered profile kept the default grey glow")
+      assert(bordered.updateRate == nil and bordered.smoothBars == nil and bordered.barSpeed == nil,
+        "obsolete refresh and animation settings survived migration")
 
       local borderless = {
         visualVersion = 4,
@@ -354,6 +359,34 @@ def run(ctx: Context):
       meter:Refresh()
     ''')
     ctx.run('''
+      -- A remainder that is mathematically 6px must still paint as a trailing
+      -- bar: float rounding through contentHeight / rowStep can land just
+      -- below the 6px threshold.
+      local meter = Skada.UI:GetPrimary()
+      local savedRows = meter.db.rows
+      meter.db.rows = 16.4
+      meter.layoutDirty = true
+      meter:Refresh()
+      assert(meter.rows[17].height > 5.9,
+        "an exactly-6px trailing bar was dropped to float rounding: " ..
+        tostring(meter.rows[17].height))
+      meter.db.rows, meter.layoutDirty = savedRows, true
+      meter:Refresh()
+    ''')
+    ctx.run('''
+      -- A window whose build failed mid-InitializeWindow stays registered for
+      -- the settings list but is inert: refreshes must skip it entirely
+      -- instead of erroring on whatever the failed build left nil.
+      local meter = Skada.UI:GetPrimary()
+      local titleBefore = meter.title.textValue
+      meter.broken = true
+      Skada.UI:RefreshAll()
+      meter:Animate()
+      assert(meter.title.textValue == titleBefore, "a broken window kept refreshing")
+      meter.broken = nil
+      meter:Refresh()
+    ''')
+    ctx.run('''
       -- Side-by-side dock: adopt the target's height, keep the width.
       local function fakeFrame(l, b, w, h)
         local f = {}
@@ -422,9 +455,29 @@ def run(ctx: Context):
     ctx.run('''
       Skada.UI:ShowReportPopup(Skada.UI:GetPrimary())
       local popup = Skada.UI.reportPopup
-      assert(popup.title ~= nil and popup.subtitle.textValue == "Send the current view")
-      assert(popup.alpha == 0.42 and rawget(popup, "OnUpdate"))
-      popup.OnUpdate(popup, 0.11)
+      local Style = Skada.UIStyle
+      assert(popup.width == 380 and popup.height == 185)
+      assert(popup.backdrop == Style.DIALOG_BACKDROP and
+        popup.backdropR == 0 and popup.backdropA == 1)
+      assert(popup.dialogTitle.textValue == "Skada" and
+        popup.dialogTitle.textR == Style.GOLD_R and
+        popup.dialogTitle.fontPath == Style.UI_FONT)
+      assert(popup.pane.backdrop == Style.PANE_BACKDROP and
+        popup.pane.backdropA == Style.PANE_BG_A and
+        popup.pane.borderR == Style.PANE_BORDER_R)
+      assert(popup.targetPane.backdrop == Style.PANE_BACKDROP and
+        popup.targetPane.backdropA == 1)
+      assert(popup.title ~= nil and
+        popup.subtitle.textValue == "Send the current view to a chat channel.")
+      assert(table.getn(popup.channelButtons) == 4 and
+        popup.channelButtons[1].textValue == "Guild" and
+        popup.channelButtons[2].textValue == "Party/Raid" and
+        popup.channelButtons[3].textValue == "Say" and
+        popup.channelButtons[4].textValue == "Whisper")
+      assert(popup.whisper.fontPath == Style.UI_FONT and
+        popup.close.textValue == (CLOSE or "Close"))
+      assert(popup.alpha == 0.38 and rawget(popup, "OnUpdate"))
+      popup.OnUpdate(popup, 0.13)
       assert(popup.alpha == 1 and not rawget(popup, "OnUpdate"))
       popup:Hide()
     ''')

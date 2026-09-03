@@ -1,22 +1,22 @@
-local Skada = (_G or getfenv(0)).Skada
+local env = _G or getfenv(0)
+local Skada = env.Skada
 
+-- Public API for the settings dialog. The rendering lives in
+-- options.dialog.lua (chrome/sidebar/pane) and options.controls.lua
+-- (renderers); this module is the surface other code calls -- slash
+-- commands, the minimap button, the window title-bar menu -- plus the
+-- selection bookkeeping shared with the on-screen window highlight.
 local Options = {
-  frame = nil,
+  frame = nil,            -- the dialog root frame, once created
   minimapButton = nil,
   selectedWindow = nil,
-  treeRows = nil,
-  pageCache = {},
 }
 Skada.Options = Options
 
-local Common = Skada.Common
-local Widgets = Skada.OptionsWidgets
-local Shell = Skada.OptionsShell
-local Style = Skada.UIStyle
+local Schema = Skada.OptionsSchema
+local Dialog = Skada.OptionsDialog
 
 local table_getn = table.getn
-
-local CONTENT_WIDTH = 400
 
 function Options:GetCurrentWindow()
   local window = self.selectedWindow
@@ -26,25 +26,47 @@ function Options:GetCurrentWindow()
   return window
 end
 
+function Options:Open()
+  if not Skada.initialized then return end
+  Dialog:Open()
+  self.frame = Dialog.Frame()
+  local window = self:GetCurrentWindow()
+  if window then Skada.UI:SetActive(window, true) end
+end
+
+function Options:Close()
+  Dialog:Close()
+end
+
+function Options:IsOpen()
+  return Dialog.IsOpen()
+end
+
+-- Redraws the open dialog (window list changed, window renamed, mode
+-- switched). Safe to call anytime.
+function Options:Refresh()
+  Dialog:Refresh()
+end
+
+function Options:Toggle()
+  if Dialog.IsOpen() then
+    Dialog:Close()
+  else
+    self:Open()
+  end
+end
+
+-- Navigates the dialog to this window's pane and highlights its sidebar row.
+-- Each window's own settings resolve entirely from a closure captured on the
+-- window at table-build time (see Schema:BuildWindowArgs);
+-- `selectedWindow` only drives the on-screen highlight and where the dialog
+-- jumps to, not what any control reads or writes.
 function Options:SelectWindow(window)
   if not window then return end
   self.selectedWindow = window
   Skada.UI:SetActive(window, true)
-  if self.frame then
-    Shell.ShowPage(self, "window")
-    Shell.UpdateTreeSelection(self)
-    Shell.RefreshPage(self)
-  end
-end
-
-function Options:OpenPage(pageKey)
-  if not self.frame then return end
-  Shell.ShowPage(self, pageKey)
-end
-
-function Options:RefreshPage()
-  if not self.frame then return end
-  Shell.RefreshPage(self)
+  Dialog:Open("window_" .. tostring(window.db.id))
+  self.frame = Dialog.Frame()
 end
 
 function Options:CycleWindow(delta)
@@ -52,43 +74,13 @@ function Options:CycleWindow(delta)
   local count = table_getn(windows)
   if count == 0 then return end
   local current = self:GetCurrentWindow()
-  local i, index
-  for i = 1, count do
-    if windows[i] == current then index = i break end
+  local windowIndex, currentIndex
+  for windowIndex = 1, count do
+    if windows[windowIndex] == current then currentIndex = windowIndex break end
   end
-  index = (index or (delta > 0 and 0 or count + 1)) + delta
-  if index > count then index = 1 elseif index < 1 then index = count end
-  self:SelectWindow(windows[index])
-end
-
-function Options:BuildPanel()
-  self.controls = self.controls or {}
-  self.kit = Widgets.CreateKit(self.controls, CONTENT_WIDTH - 16)
-  Shell.Build(self)
-end
-
-function Options:Open()
-  if not Skada.initialized then return end
-  if not self.frame then self:BuildPanel() end
-  local window = self:GetCurrentWindow()
-  Shell.RebuildTree(self)
-  if not self.currentPage then
-    self:OpenPage("general")
-  else
-    self:OpenPage(self.currentPage)
-  end
-  Shell.RefreshPage(self)
-  if window then Skada.UI:SetActive(window, true) end
-  self.frame:Show()
-  Style:FadeIn(self.frame, 0.38, 0.13, 1)
-end
-
-function Options:Toggle()
-  if self.frame and self.frame:IsShown() then
-    self.frame:Hide()
-  else
-    self:Open()
-  end
+  currentIndex = (currentIndex or (delta > 0 and 0 or count + 1)) + delta
+  if currentIndex > count then currentIndex = 1 elseif currentIndex < 1 then currentIndex = count end
+  self:SelectWindow(windows[currentIndex])
 end
 
 function Options:CreateMinimapButton()
@@ -105,12 +97,6 @@ end
 Skada:RegisterInitializer(function() Options:Initialize() end, "options panel")
 
 Skada:Subscribe("windowListChanged", function()
-  if not Options.frame then return end
-  if Options.currentPage == "window" and not Options:GetCurrentWindow() then
-    Options.selectedWindow = nil
-  end
-  Shell.RebuildTree(Options)
-  if Options.currentPage == "window" and not Options:GetCurrentWindow() then
-    Options:OpenPage("general")
-  end
+  Options:GetCurrentWindow() -- self-heals and re-caches selectedWindow if it was deleted
+  Schema:NotifyChanged()
 end)

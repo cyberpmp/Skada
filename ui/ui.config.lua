@@ -8,8 +8,6 @@ local max = math.max
 local table_getn = table.getn
 local tonumber = tonumber
 
--- Snap-size keeps fractional rows so a copied window height can be rebuilt
--- exactly. Rendering and pagination still operate on complete row slots.
 function WindowConfig.GetVisibleRowCount(config)
   return max(1, floor(tonumber(config and config.rows) or 1))
 end
@@ -23,9 +21,9 @@ WindowConfig.keys = {
 }
 
 function WindowConfig.ApplyDefaults(target, source)
-  local i, key
-  for i = 1, table_getn(WindowConfig.keys) do
-    key = WindowConfig.keys[i]
+  local keyIndex, key
+  for keyIndex = 1, table_getn(WindowConfig.keys) do
+    key = WindowConfig.keys[keyIndex]
     if target[key] == nil then target[key] = source[key] end
   end
   if target.visible == nil then target.visible = true end
@@ -50,8 +48,6 @@ function WindowConfig.ApplyDefaults(target, source)
   if target.snapGap == nil or target.snapGap == 4 then target.snapGap = 0 end
   if target.snapSize == nil then target.snapSize = true end
   if target.nameIsCustom == nil then
-    -- pre-upgrade windows carry no flag; a name that is not any mode's title
-    -- can only be a hand-set name and must survive mode switches
     target.nameIsCustom = target.name ~= nil and not Skada.Modes:IsTitle(target.name)
   end
   if target.combatMode == nil then target.combatMode = "" end
@@ -62,19 +58,21 @@ end
 function WindowConfig.SyncLegacy(manager, window)
   if window ~= manager:GetPrimary() then return end
   local profile = Skada.db.profile
-  local i, key
-  for i = 1, table_getn(WindowConfig.keys) do
-    key = WindowConfig.keys[i]
+  local keyIndex, key
+  for keyIndex = 1, table_getn(WindowConfig.keys) do
+    key = WindowConfig.keys[keyIndex]
     profile[key] = window.db[key]
   end
 end
 
 function WindowConfig.Migrate(profile)
-  local i
-  -- Migration state belongs to the profile. Older builds copied it into each
-  -- window, where primary-window synchronization could later downgrade it.
-  for i = 1, table_getn(profile.windows or {}) do
-    profile.windows[i].visualVersion = nil
+  local windowIndex
+  profile.updateRate = nil
+  profile.smoothBars = nil
+  profile.barSpeed = nil
+
+  for windowIndex = 1, table_getn(profile.windows or {}) do
+    profile.windows[windowIndex].visualVersion = nil
   end
 
   if not profile.visualVersion then
@@ -87,8 +85,8 @@ function WindowConfig.Migrate(profile)
 
   if profile.visualVersion < 3 then
     local config
-    for i = 1, table_getn(profile.windows or {}) do
-      config = profile.windows[i]
+    for windowIndex = 1, table_getn(profile.windows or {}) do
+      config = profile.windows[windowIndex]
       if config.fontSize == 14 then config.fontSize = 15 end
       if config.barAlpha == 0.78 then config.barAlpha = 0.92 end
     end
@@ -99,8 +97,8 @@ function WindowConfig.Migrate(profile)
 
   if profile.visualVersion < 4 then
     local config
-    for i = 1, table_getn(profile.windows or {}) do
-      config = profile.windows[i]
+    for windowIndex = 1, table_getn(profile.windows or {}) do
+      config = profile.windows[windowIndex]
       if config.barSpacing == 0 then config.barSpacing = 2 end
       if config.barAlpha == 0.92 then config.barAlpha = 0.90 end
     end
@@ -110,8 +108,6 @@ function WindowConfig.Migrate(profile)
   end
 
   if profile.visualVersion < 5 then
-    -- Early border-style builds inherited the soft grey glow. Move existing
-    -- profiles to the plain configured edge; the shadow remains opt-in.
     if profile.hideWindowBorder then
       profile.windowBorderStyle = "none"
     else

@@ -2,6 +2,89 @@
 
 All notable changes to the PMP Skada rewrite are documented here.
 
+## 2.0.0 - 2026-09-07
+
+### Added
+
+- Healing, HPS, and Healing Targets bars now show the estimated overheal as a
+  dimmer continuation of the bar past the effective healing, so a healer's
+  bar reads effective + overheal = total cast healing at a glance; the
+  tooltip still carries the numbers.
+
+### Changed
+
+- The settings dialog is now Skada's own code, built directly on the client's
+  frame APIs. Every slider shows its value as plain text (no type-in box that
+  could render blank), the layout is pure arithmetic so controls are correct
+  on first open, the select popup menu is Skada-owned and cannot be clipped
+  by the scroll pane, and the window-name box feeds its text through a
+  one-shot placement driver — no more open/close cycle to see values.
+- `core/core.compat.lua` is trimmed to generic shims: stdlib repairs
+  (`string.match` probe-and-repair against RollFor's clobber, `string.split`,
+  the length-tracking `table.*` functions, `table.sort`), the CreateFrame
+  wrapper's client-gap fixes (now `.obj`-gated so BigDebuffs' own bundled
+  Ace3 keeps benefiting from them), and the layering helpers. The Ace3-only
+  EditBox nudge machinery is gone.
+- Settings now follow their actual ownership: every addon-wide behavior,
+  appearance, data, and reset control lives under General, while individual
+  window pages contain only settings stored by that window. "+ New window" is
+  now the first item beneath Windows for immediate access.
+- Display rebuilding now uses one tuned 4 Hz cadence, while bars always animate
+  smoothly at fixed speed 5. Quiet actor meters stop rebuilding during combat;
+  time-dependent views continue updating at the fixed cadence.
+- Runtime tickers are coalesced at the shortest registered interval, and bar
+  animation visits only windows with visible movement before stopping at a
+  subpixel threshold. Stable titles, ranks, and toggle chrome avoid redundant
+  client widget updates.
+- The report dialog now shares the settings window's classic frame, gold title,
+  inset panes, native buttons, typography, fade timing, and window behavior.
+- Threat rows now match damage and healing rows: total threat followed by TPS
+  and aggro percentage together in parentheses. Ungrouped threat no longer
+  sends server queries and displays only the player and owned pets.
+- Combat-name normalization uses a pattern-free fast path, repeated unknown
+  sources and unresolved target-unit lookups are cached, and fallback threat
+  projections reuse row tables instead of reallocating and sorting twice on
+  every estimate tick.
+- Natural-order combat formats bypass capture remapping, aggregate writes use
+  stable hot-path function references, and fallback healing distributes threat
+  using an incrementally maintained enemy count.
+- Ambient aura changes coalesce by unit and refresh within a bounded per-tick
+  budget. Segment start queues only unseen group, target, and focus units,
+  keeping uptime segment-scoped without a synchronous roster scan on pull.
+- Live duration is sampled once per display rebuild where multiple rows use it,
+  and cleared display entries release actor, spell, and segment references so
+  reset data is not retained by the UI pool.
+
+### Removed
+
+- The entire vendored Ace3 stack under `libs/` (LibStub, CallbackHandler-1.0,
+  AceGUI-3.0, AceConfig-3.0 with Registry/Cmd/Dialog — about 10,400 lines) is
+  deleted, along with the Ace3-specific `options/options.sidebar.lua`,
+  `options/options.widgets.lua`, `options/options.shell.lua`, and the
+  AceGUI ScrollFrame widget shim. The options schema
+  (`options/options.schema.lua`) stays as the data contract.
+- The update-rate, bar-smoothing, and animation-speed settings and their legacy
+  saved values. Display cadence and smooth animation are now tuned internally.
+
+### Fixed
+
+- Mixed positional and automatic localized combat formats now map every capture
+  to the correct logical argument instead of silently taking a broken fast path.
+- Cached ignored pet sources are reconsidered when a newly observed owner becomes
+  trackable, so owner-derived damage is not stranded behind a negative lookup.
+- Pending dispel snapshots still resolve while segment recording is inactive,
+  and damage needed for a crowd-control break survives a cached unit lookup miss.
+- Custom window names remain painted across refreshes and live-mode changes, and
+  an all-zero meter uses a safe nonzero paint maximum.
+- Group and raid roster detection no longer collapses after a rebuild, and
+  segment cycling advances reliably after its choice list is refilled.
+- A window whose construction fails mid-build remains inert and visible in the
+  settings list instead of erroring on every refresh tick.
+- Scrolling immediately after enlarging a window no longer errors; the extra
+  rows appear at the next update.
+- A trailing bar exactly six pixels tall no longer flickers through floating-
+  point rounding in the height calculation.
+
 ## 1.2.1 - 2026-09-02
 
 ### Changed
@@ -100,9 +183,9 @@ All notable changes to the PMP Skada rewrite are documented here.
   bar is displayed.
 - Per-window combat mode switching: a window can switch to a chosen mode when
   combat starts and optionally return to its previous mode when combat ends.
-- The window settings are now one scrollable page with Combat, Design,
-  Text & Color, and Mode & Data sections, so every setting is reachable
-  without hunting through tabs.
+- The window settings are now one scrollable page with Combat, Design, and
+  Mode & Segment sections, so every per-window setting is reachable without
+  hunting through tabs.
 - Windows can now be dragged from any bar or the window background, not only
   the title bar; dragging a bar no longer also opens its detail view.
 - Restyled the settings window with the classic dialog frame, gold title

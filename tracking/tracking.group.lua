@@ -5,19 +5,30 @@ Skada.GroupObserver = GroupObserver
 
 local table_getn = table.getn
 
-function GroupObserver:ObserveGroup(recordNew)
+function GroupObserver:ObserveGroup(recordNew, now)
   if not self.auraAPI or not Skada.Data.groupTokens then return end
-  local i
-  for i = 1, table_getn(Skada.Data.groupTokens) do
-    self:ScanAll(Skada.Data.groupTokens[i], recordNew, GetTime())
+  local tokenIndex
+  now = now or GetTime()
+  for tokenIndex = 1, table_getn(Skada.Data.groupTokens) do
+    self:ScanAll(Skada.Data.groupTokens[tokenIndex], recordNew, now)
+  end
+end
+
+function GroupObserver:QueueGroupBaseline(unknownOnly, now)
+  if not self.auraAPI or not Skada.Data.groupTokens then return end
+  local tokenIndex
+  for tokenIndex = 1, table_getn(Skada.Data.groupTokens) do
+    self:QueueAuraBaseline(Skada.Data.groupTokens[tokenIndex], unknownOnly, now)
   end
 end
 
 Skada:RegisterEvent("RAID_ROSTER_UPDATE", function()
   local tracking = Skada.Tracking
-  if tracking then tracking:ObserveGroup(false) end
+  if not tracking then return end
+  if Skada.Data.active then tracking:ObserveGroup(false) else tracking:QueueGroupBaseline() end
 end)
 Skada:RegisterEvent("PARTY_MEMBERS_CHANGED", function()
   local tracking = Skada.Tracking
-  if tracking then tracking:ObserveGroup(false) end
+  if not tracking then return end
+  if Skada.Data.active then tracking:ObserveGroup(false) else tracking:QueueGroupBaseline() end
 end)

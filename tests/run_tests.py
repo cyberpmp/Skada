@@ -12,7 +12,7 @@ import sys
 import time
 import traceback
 
-from harness import Context, lint_upvalue_aliases, load_addon
+from harness import Context, lint_script_hooks, lint_upvalue_aliases, load_addon
 from suites import (
     auras,
     boot,
@@ -53,6 +53,7 @@ def main():
         return
 
     lint_upvalue_aliases()
+    lint_script_hooks()
     lua, skada = load_addon()
     ctx = Context(lua, skada)
 

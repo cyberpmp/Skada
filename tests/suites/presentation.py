@@ -123,6 +123,35 @@ def run(ctx: Context):
       Skada.Modes:Set("healing", second)
       second.db.autoSwitch = false
       second.db.segment = "total"
+
+      -- Healing bars carry the overheal as a dimmer continuation past the
+      -- effective fill: Bob's 900 cast healing is 400 effective + 500
+      -- overheal (combat suite), so the bar scale is the 900 total, the
+      -- fill ends at 400/900 of the row and the continuation covers the
+      -- remaining 500/900, in the row's colour at reduced alpha.
+      second.view, second.detailActor, second.scrollOffset = "mode", nil, 0
+      second:Refresh()
+      local healRow = second.rows[1]
+      assert(healRow.entry and healRow.entry.actor.name == "Bob", "Bob is not the top healer")
+      assert(healRow.entry.value == 400 and healRow.entry.extra == 500,
+        "healing entry must carry effective as value and overheal as extra")
+      assert(second.paintMaximum == 900, "bar scale must cover effective + overheal: " .. tostring(second.paintMaximum))
+      local healRowWidth = second.db.width - 2 * Skada.UIStyle.WINDOW_PADDING
+      assert(healRow.extra.shown, "overheal continuation must be shown")
+      assert(math.abs(healRow.extra.lastPointX - healRowWidth * 400 / 900) < 0.01,
+        "continuation must start where the effective fill ends")
+      assert(math.abs(rawget(healRow.extra, "width") - healRowWidth * 500 / 900) < 0.01,
+        "continuation must span the overheal share of the row")
+      assert(healRow.extra.vertexR == healRow.lastR and healRow.extra.alpha < healRow.lastAlpha,
+        "continuation must use the bar's colour, dimmed")
+      local damageMode = Skada.Modes:Get("damage")
+      assert(Skada.Modes:GetActorExtra(damageMode, Skada.Data.current.actors.Bob) == nil,
+        "modes without an extraField draw no continuation")
+      Skada.Modes:Set("damage", second)
+      second:Refresh()
+      assert(not second.rows[1].extra.shown, "switching to a mode without extra must hide the continuation")
+      Skada.Modes:Set("healing", second)
+      second:Refresh()
       Skada.UI:SetActive(second)
       Skada.UI:OnCombatState(true)
       assert(primary.db.segment == "current" and second.db.segment == "total")

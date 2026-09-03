@@ -6,6 +6,7 @@ Skada.MinimapButton = MinimapButton
 local Common = Skada.Common
 local getClickButton = Common.GetClickButton
 local setFont = Common.SetFont
+local attachTooltip = Common.AttachTooltip
 
 local cos = math.cos
 local sin = math.sin
@@ -107,7 +108,7 @@ function MinimapButton:Create()
     Skada:MarkDirty()
   end)
 
-  Skada.OptionsWidgets.AttachTooltip(instance, "Skada",
+  attachTooltip(instance, "Skada",
     "Left-click to show or hide the meter window.\nRight-click to open the settings window.\nShift-click to reset fight data. Drag to reposition.")
 
   positionAt(instance, Skada.db.profile.minimap.angle)
