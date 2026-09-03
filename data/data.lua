@@ -16,6 +16,13 @@ local tonumber = tonumber
 local max = math.max
 local min = math.min
 
+local recordDamageSet = DataAggregator.RecordDamageSet
+local recordHealingSet = DataAggregator.RecordHealingSet
+local recordPowerSet = DataAggregator.RecordPowerSet
+local recordCountSet = DataAggregator.RecordCountSet
+local recordDeathSet = DataAggregator.RecordDeathSet
+local recordDurationSet = DataAggregator.RecordDurationSet
+
 Data.AddObservedUnit = DataIdentity.AddObservedUnit
 Data.AddGroupUnit = DataIdentity.AddGroupUnit
 Data.RebuildRoster = DataIdentity.RebuildRoster
@@ -56,6 +63,8 @@ function Data:Initialize()
   self.combatStateKnown = self.clientInCombat
   self.noCombatSince = nil
   self.playerName = UnitName("player") or "Player"
+  self.healingMissByName = {}
+  self.healingMissPrune = 0
   self:RebuildRoster()
 end
 
@@ -66,19 +75,17 @@ function Data:RecordDamage(sourceName, targetName, amount, spellName, spellID, s
   now = now or GetTime()
 
   local actorName, sourceIdentity, petName = self:ResolveSource(sourceName)
-  local targetActorName, targetIdentity = self:ResolveTarget(targetName)
+  local targetActorName, targetIdentity, rawTargetName = self:ResolveTarget(targetName)
   if not actorName and not targetActorName then return end
 
-  local rawTargetName = trim(targetName)
   local segmentName
   if not targetActorName then segmentName = rawTargetName end
   if not self:EnsureSegment(now, segmentName, true) then return end
   local selfDamage = actorName and targetActorName and actorName == targetActorName
   if petName then spellName = "[" .. petName .. "] " .. (spellName or "Attack") end
-  rawTargetName = rawTargetName or targetActorName
 
-  DataAggregator:RecordDamageSet(self.current, actorName, sourceIdentity, targetActorName, targetIdentity, amount, spellName, spellID, critical, selfDamage, now, rawTargetName, mitigationType, mitigationAmount)
-  DataAggregator:RecordDamageSet(self.total, actorName, sourceIdentity, targetActorName, targetIdentity, amount, spellName, spellID, critical, selfDamage, now, rawTargetName, mitigationType, mitigationAmount)
+  recordDamageSet(DataAggregator, self.current, actorName, sourceIdentity, targetActorName, targetIdentity, amount, spellName, spellID, critical, selfDamage, now, rawTargetName, mitigationType, mitigationAmount)
+  recordDamageSet(DataAggregator, self.total, actorName, sourceIdentity, targetActorName, targetIdentity, amount, spellName, spellID, critical, selfDamage, now, rawTargetName, mitigationType, mitigationAmount)
   if actorName and not selfDamage and not targetActorName and rawTargetName then
     Skada:Publish("damageRecorded", actorName, sourceIdentity, rawTargetName, amount, spellName, spellID, now)
   end
@@ -98,26 +105,44 @@ function Data:RecordHealing(sourceName, targetName, amount, spellName, spellID, 
   if not self:EnsureSegment(now, nil, false) then return end
   if petName then spellName = "[" .. petName .. "] " .. (spellName or "Heal") end
   local rawTargetName = trim(targetName)
-  local effective, overhealing, verified = self:EstimateHealing(rawTargetName, amount)
+  local effective, overhealing, verified = self:EstimateHealing(rawTargetName, amount, now)
 
-  DataAggregator:RecordHealingSet(self.current, actorName, identity, amount, effective, overhealing, verified, spellName, spellID, critical, now, rawTargetName)
-  DataAggregator:RecordHealingSet(self.total, actorName, identity, amount, effective, overhealing, verified, spellName, spellID, critical, now, rawTargetName)
+  recordHealingSet(DataAggregator, self.current, actorName, identity, amount, effective, overhealing, verified, spellName, spellID, critical, now, rawTargetName)
+  recordHealingSet(DataAggregator, self.total, actorName, identity, amount, effective, overhealing, verified, spellName, spellID, critical, now, rawTargetName)
   Skada:Publish("healingRecorded", actorName, identity, effective, now)
   Skada:MarkDirty()
   return true
 end
 
-function Data:EstimateHealing(targetName, amount)
+function Data:EstimateHealing(targetName, amount, now)
+  now = now or GetTime()
+  local missedAt = self.healingMissByName[targetName]
+  if missedAt and now - missedAt < 0.5 then
+    return amount, 0, false
+  end
+
+  if now - self.healingMissPrune > 5 then
+    self.healingMissPrune = now
+    local name, stamp
+    for name, stamp in pairs(self.healingMissByName) do
+      if now - stamp > 5 then self.healingMissByName[name] = nil end
+    end
+  end
+
   local unit = self:FindUnitByName(targetName)
   if unit and UnitHealth and UnitHealthMax then
     local health = tonumber(UnitHealth(unit))
     local maximum = tonumber(UnitHealthMax(unit))
     if health and maximum and maximum > 0 then
+      self.healingMissByName[targetName] = nil
       local effective = min(amount, max(0, maximum - health))
       return effective, amount - effective, true
     end
   end
 
+  if not missedAt or now - missedAt >= 0.5 then
+    self.healingMissByName[targetName] = now
+  end
   return amount, 0, false
 end
 
@@ -132,8 +157,8 @@ function Data:RecordPower(gainerName, sourceName, amount, powerType, spellName, 
   spellName = spellName or "Power"
   if petName then spellName = "[" .. petName .. "] " .. spellName end
 
-  DataAggregator:RecordPowerSet(self.current, actorName, identity, amount, spellName, spellID, powerType, now)
-  DataAggregator:RecordPowerSet(self.total, actorName, identity, amount, spellName, spellID, powerType, now)
+  recordPowerSet(DataAggregator, self.current, actorName, identity, amount, spellName, spellID, powerType, now)
+  recordPowerSet(DataAggregator, self.total, actorName, identity, amount, spellName, spellID, powerType, now)
   Skada:MarkDirty()
   return true
 end
@@ -152,8 +177,8 @@ function Data:RecordCount(field, detailField, sourceName, targetName, abilityNam
   if petName then abilityName = "[" .. petName .. "] " .. (abilityName or field) end
 
   local resolvedDetail = detailName or abilityName or field
-  DataAggregator:RecordCountSet(self.current, actorName, identity, field, detailField, resolvedDetail, spellID, count, now)
-  DataAggregator:RecordCountSet(self.total, actorName, identity, field, detailField, resolvedDetail, spellID, count, now)
+  recordCountSet(DataAggregator, self.current, actorName, identity, field, detailField, resolvedDetail, spellID, count, now)
+  recordCountSet(DataAggregator, self.total, actorName, identity, field, detailField, resolvedDetail, spellID, count, now)
   Skada:MarkDirty()
   return true
 end
@@ -182,8 +207,8 @@ function Data:RecordDuration(field, detailField, sourceName, spellName, duration
   if duration <= 0 then return end
   local actorName = self:ResolveSource(sourceName)
   if not actorName then return end
-  DataAggregator:RecordDurationSet(self.current, actorName, field, detailField, spellName, duration)
-  DataAggregator:RecordDurationSet(self.total, actorName, field, detailField, spellName, duration)
+  recordDurationSet(DataAggregator, self.current, actorName, field, detailField, spellName, duration)
+  recordDurationSet(DataAggregator, self.total, actorName, field, detailField, spellName, duration)
   Skada:MarkDirty()
 end
 
@@ -214,8 +239,8 @@ function Data:RecordDeath(targetName, now, killerName, killerSpell)
   if not actorName then return end
   if not self:EnsureSegment(now, nil, false) then return end
 
-  DataAggregator:RecordDeathSet(self.current, actorName, identity, now, killerName, killerSpell)
-  DataAggregator:RecordDeathSet(self.total, actorName, identity, now, killerName, killerSpell)
+  recordDeathSet(DataAggregator, self.current, actorName, identity, now, killerName, killerSpell)
+  recordDeathSet(DataAggregator, self.total, actorName, identity, now, killerName, killerSpell)
   Skada:MarkDirty()
 end
 

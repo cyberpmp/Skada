@@ -51,30 +51,30 @@ function SnapDock.SnapWindow(manager, window)
     consider(screenWidth - width, screenHeight - height)
   end
 
-  local i, other, oLeft, oBottom, oWidth, oHeight, oRight, oTop
-  for i = 1, table_getn(manager.windows) do
-    other = manager.windows[i]
+  local windowIndex, other, otherLeft, otherBottom, otherWidth, otherHeight, otherRight, otherTop
+  for windowIndex = 1, table_getn(manager.windows) do
+    other = manager.windows[windowIndex]
     if other ~= window and other.db.visible and other.frame.GetLeft then
-      oLeft, oBottom = other.frame:GetLeft(), other.frame:GetBottom()
-      oWidth, oHeight = other.frame:GetWidth(), other.frame:GetHeight()
-      if oLeft and oBottom and oWidth and oHeight then
-        local oScale = other.frame.GetEffectiveScale and other.frame:GetEffectiveScale() or 1
-        if type(oScale) ~= "number" or oScale <= 0 then oScale = 1 end
-        oLeft, oBottom = oLeft * oScale, oBottom * oScale
-        oWidth, oHeight = oWidth * oScale, oHeight * oScale
-        oRight, oTop = oLeft + oWidth, oBottom + oHeight
+      otherLeft, otherBottom = other.frame:GetLeft(), other.frame:GetBottom()
+      otherWidth, otherHeight = other.frame:GetWidth(), other.frame:GetHeight()
+      if otherLeft and otherBottom and otherWidth and otherHeight then
+        local otherScale = other.frame.GetEffectiveScale and other.frame:GetEffectiveScale() or 1
+        if type(otherScale) ~= "number" or otherScale <= 0 then otherScale = 1 end
+        otherLeft, otherBottom = otherLeft * otherScale, otherBottom * otherScale
+        otherWidth, otherHeight = otherWidth * otherScale, otherHeight * otherScale
+        otherRight, otherTop = otherLeft + otherWidth, otherBottom + otherHeight
 
-        if left < oRight and right > oLeft and bottom < oTop and top > oBottom then
+        if left < otherRight and right > otherLeft and bottom < otherTop and top > otherBottom then
           local centerX, centerY = left + width * 0.5, bottom + height * 0.5
-          local parentCenterX, parentCenterY = oLeft + oWidth * 0.5, oBottom + oHeight * 0.5
+          local parentCenterX, parentCenterY = otherLeft + otherWidth * 0.5, otherBottom + otherHeight * 0.5
           local axisDistance = math.abs(centerX - parentCenterX) - math.abs(centerY - parentCenterY)
           local candidateLeft, candidateBottom
           if axisDistance >= 0 then
-            candidateLeft = centerX < parentCenterX and (oLeft - gap - width) or (oRight + gap)
-            candidateBottom = oTop - height
+            candidateLeft = centerX < parentCenterX and (otherLeft - gap - width) or (otherRight + gap)
+            candidateBottom = otherTop - height
           else
-            candidateLeft = oLeft
-            candidateBottom = centerY < parentCenterY and (oBottom - gap - height) or (oTop + gap)
+            candidateLeft = otherLeft
+            candidateBottom = centerY < parentCenterY and (otherBottom - gap - height) or (otherTop + gap)
           end
           local approach = math.abs(centerX - parentCenterX) + math.abs(centerY - parentCenterY)
           if not dockParent or approach < dockDistance then
@@ -82,32 +82,32 @@ function SnapDock.SnapWindow(manager, window)
           end
         end
 
-        if rangesOverlap(bottom, top, oBottom, oTop, distance) then
-          if math.abs(left - oLeft) <= distance then consider(oLeft, bottom, other) end
-          if math.abs(left - oRight) <= distance then consider(oRight, bottom, other) end
-          if math.abs(right - oLeft) <= distance then consider(oLeft - width, bottom, other) end
-          if math.abs(right - oRight) <= distance then consider(oRight - width, bottom, other) end
+        if rangesOverlap(bottom, top, otherBottom, otherTop, distance) then
+          if math.abs(left - otherLeft) <= distance then consider(otherLeft, bottom, other) end
+          if math.abs(left - otherRight) <= distance then consider(otherRight, bottom, other) end
+          if math.abs(right - otherLeft) <= distance then consider(otherLeft - width, bottom, other) end
+          if math.abs(right - otherRight) <= distance then consider(otherRight - width, bottom, other) end
         end
-        if rangesOverlap(left, right, oLeft, oRight, distance) then
-          if math.abs(bottom - oBottom) <= distance then consider(left, oBottom, other) end
-          if math.abs(bottom - oTop) <= distance then consider(left, oTop, other) end
-          if math.abs(top - oBottom) <= distance then consider(left, oBottom - height, other) end
-          if math.abs(top - oTop) <= distance then consider(left, oTop - height, other) end
+        if rangesOverlap(left, right, otherLeft, otherRight, distance) then
+          if math.abs(bottom - otherBottom) <= distance then consider(left, otherBottom, other) end
+          if math.abs(bottom - otherTop) <= distance then consider(left, otherTop, other) end
+          if math.abs(top - otherBottom) <= distance then consider(left, otherBottom - height, other) end
+          if math.abs(top - otherTop) <= distance then consider(left, otherTop - height, other) end
         end
 
-        if math.abs(left - (oRight + gap)) <= distance then
-          if math.abs(top - oTop) <= distance then consider(oRight + gap, oTop - height, other) end
-          if math.abs(bottom - oBottom) <= distance then consider(oRight + gap, oBottom, other) end
+        if math.abs(left - (otherRight + gap)) <= distance then
+          if math.abs(top - otherTop) <= distance then consider(otherRight + gap, otherTop - height, other) end
+          if math.abs(bottom - otherBottom) <= distance then consider(otherRight + gap, otherBottom, other) end
         end
-        if math.abs(right - (oLeft - gap)) <= distance then
-          if math.abs(top - oTop) <= distance then consider(oLeft - gap - width, oTop - height, other) end
-          if math.abs(bottom - oBottom) <= distance then consider(oLeft - gap - width, oBottom, other) end
+        if math.abs(right - (otherLeft - gap)) <= distance then
+          if math.abs(top - otherTop) <= distance then consider(otherLeft - gap - width, otherTop - height, other) end
+          if math.abs(bottom - otherBottom) <= distance then consider(otherLeft - gap - width, otherBottom, other) end
         end
-        if math.abs(bottom - (oTop + gap)) <= distance and math.abs(left - oLeft) <= distance then
-          consider(oLeft, oTop + gap, other)
+        if math.abs(bottom - (otherTop + gap)) <= distance and math.abs(left - otherLeft) <= distance then
+          consider(otherLeft, otherTop + gap, other)
         end
-        if math.abs(top - (oBottom - gap)) <= distance and math.abs(left - oLeft) <= distance then
-          consider(oLeft, oBottom - gap - height, other)
+        if math.abs(top - (otherBottom - gap)) <= distance and math.abs(left - otherLeft) <= distance then
+          consider(otherLeft, otherBottom - gap - height, other)
         end
       end
     end
@@ -119,24 +119,18 @@ function SnapDock.SnapWindow(manager, window)
 
   if bestDistance <= distance then
     if bestParent and window.db.snapSize ~= false then
-      local pScale = bestParent.frame.GetEffectiveScale and bestParent.frame:GetEffectiveScale() or 1
-      if type(pScale) ~= "number" or pScale <= 0 then pScale = 1 end
-      local parentWidth = bestParent.frame:GetWidth() * pScale
-      local parentHeight = bestParent.frame:GetHeight() * pScale
+      local parentScale = bestParent.frame.GetEffectiveScale and bestParent.frame:GetEffectiveScale() or 1
+      if type(parentScale) ~= "number" or parentScale <= 0 then parentScale = 1 end
+      local parentWidth = bestParent.frame:GetWidth() * parentScale
+      local parentHeight = bestParent.frame:GetHeight() * parentScale
       local parentLeft = bestParent.frame.GetLeft and bestParent.frame:GetLeft()
       local parentBottom = bestParent.frame.GetBottom and bestParent.frame:GetBottom()
       if parentWidth and parentHeight then
-        -- Side-by-side docks share the vertical span: adopt the target's
-        -- height and keep the width. Stacked docks share the horizontal
-        -- span: adopt the width and keep the row count. Corner docks take
-        -- both. Only recurse when a dimension truly changes, or a
-        -- beside/stacked dock would loop forever on the axis it never
-        -- touches.
         local newWidth, newHeight = width, height
         local changed = false
         local beside, stacked = false, false
         if parentLeft and parentBottom then
-          parentLeft, parentBottom = parentLeft * pScale, parentBottom * pScale
+          parentLeft, parentBottom = parentLeft * parentScale, parentBottom * parentScale
           beside = bestBottom < parentBottom + parentHeight and bestBottom + height > parentBottom
           stacked = bestLeft < parentLeft + parentWidth and bestLeft + width > parentLeft
         end
@@ -171,15 +165,6 @@ function SnapDock.PersistGeometry(window, persistPoint)
   local rowStep = profile.barHeight + profile.barSpacing
   local headerHeight = profile.hideTitle and 0 or Style.HEADER_HEIGHT
   local contentHeight = frame:GetHeight() - headerHeight - Style.FOOTER_HEIGHT
-  -- Keep the exact ratio instead of rounding to whole rows so ApplyLayout's
-  -- rows * rowStep reconstruction reproduces this height precisely: snapSize
-  -- copies the neighbour's raw pixel height, and rounding it here would
-  -- unalign a snapped edge the moment the drag ends (a hidden-title window
-  -- adopting a titled window's height cannot even represent the header delta
-  -- in whole rows). The fractional final row is not dead space anymore:
-  -- ApplyLayout paints it as a short trailing bar. Only the 3..30 clamp may
-  -- change the height, and the SetHeight below settles that immediately
-  -- rather than deferring it to the next rebuild.
   profile.rows = min(30, max(3, contentHeight / rowStep))
   if frame.SetHeight then
     frame:SetHeight(headerHeight + profile.rows * rowStep + Style.FOOTER_HEIGHT)

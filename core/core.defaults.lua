@@ -13,7 +13,6 @@ Defaults.schema = {
     barSpacing = 2,
     fontSize = 15,
     barAlpha = 0.90,
-    updateRate = 0.25,
     mode = "damage",
     segment = "current",
     mergePets = true,
@@ -46,10 +45,7 @@ Defaults.schema = {
     windowOpacity = 0.90,
     windowBorderStyle = "solid",
     windowBorderColor = { 0.10, 0.11, 0.14 },
-    -- Kept for saved-variable compatibility; windowBorderStyle supersedes it.
     hideWindowBorder = false,
-    smoothBars = true,
-    barSpeed = 8,
     minimap = { show = true, angle = 205 },
     windows = {},
     selectedWindowID = 1,

@@ -13,6 +13,7 @@ local tonumber = tonumber
 local tostring = tostring
 local type = type
 local table_getn = table.getn
+local table_insert = table.insert
 
 local trackBackdrop = Common.TRACK_BACKDROP
 
@@ -72,7 +73,7 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
 
   local function registerControl(row, refresh)
     row.refresh = refresh
-    controls[table_getn(controls) + 1] = row
+    table_insert(controls, row)
   end
 
   function kit.createRow(parent, height)
@@ -102,18 +103,15 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
     row:SetPoint("TOPLEFT", parent, "TOPLEFT", PAD_X, -parent.nextY)
     parent.nextY = parent.nextY + 30
 
-    -- Standard game checkbox (same template FastHeal's settings use) so the
-    -- checked state is unmistakable. Mouse stays off it: the row button owns
-    -- clicks, so the whole row toggles and shows the tooltip.
     checkCount = checkCount + 1
-    local cb = CreateFrame("CheckButton", "SkadaOptionsCheck" .. checkCount, row, "OptionsCheckButtonTemplate")
-    cb:SetWidth(24)
-    cb:SetHeight(24)
-    cb:SetPoint("TOPLEFT", row, "TOPLEFT", 2, 1)
-    cb:EnableMouse(false)
+    local checkBox = CreateFrame("CheckButton", "SkadaOptionsCheck" .. checkCount, row, "OptionsCheckButtonTemplate")
+    checkBox:SetWidth(24)
+    checkBox:SetHeight(24)
+    checkBox:SetPoint("TOPLEFT", row, "TOPLEFT", 2, 1)
+    checkBox:EnableMouse(false)
 
     local text = row:CreateFontString(nil, "OVERLAY")
-    text:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+    text:SetPoint("LEFT", checkBox, "RIGHT", 4, 0)
     text:SetJustifyH("LEFT")
     setUiFont(text, 12)
     text:SetText(label)
@@ -133,7 +131,7 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
     end
 
     function row.refresh()
-      cb:SetChecked(get() and true or false)
+      checkBox:SetChecked(get() and true or false)
     end
     registerControl(row, row.refresh)
     return row
@@ -156,8 +154,6 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
     valueText:SetPoint("TOPRIGHT", row, "TOPRIGHT", -2, -3)
     valueText:SetJustifyH("RIGHT")
     setUiFont(valueText, 12)
-    -- Gold value, mirroring the standard options slider so the live number
-    -- reads at a glance.
     valueText:SetTextColor(Style.GOLD_R, Style.GOLD_G, Style.GOLD_B, 1)
 
     local track = CreateFrame("Button", nil, row)
@@ -235,8 +231,6 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
       if not IsMouseButtonDown or not row.IsMouseOver then return end
       local down = IsMouseButtonDown("LeftButton") and true or false
       if dragging then
-        -- once the drag starts it follows the cursor anywhere, so the value
-        -- keeps updating when the cursor strays off the thin track
         if down then
           setFromCursor()
         else
@@ -286,9 +280,9 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
 
     local function labelFor(value)
       local list = resolveChoices()
-      local i
-      for i = 1, table_getn(list) do
-        if list[i].value == value then return list[i].label end
+      local choiceIndex
+      for choiceIndex = 1, table_getn(list) do
+        if list[choiceIndex].value == value then return list[choiceIndex].label end
       end
     end
 
@@ -301,9 +295,9 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
     local function initializer(frame, level)
       local list = resolveChoices()
       local current = get()
-      local i
-      for i = 1, table_getn(list) do
-        local choice = list[i]
+      local choiceIndex
+      for choiceIndex = 1, table_getn(list) do
+        local choice = list[choiceIndex]
         local info = UIDropDownMenu_CreateInfo()
         info.text = choice.label
         info.value = choice.value
@@ -328,9 +322,9 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
       local list = resolveChoices()
       local current = get()
       local index = 0
-      local i
-      for i = 1, table_getn(list) do
-        if list[i].value == current then index = i end
+      local choiceIndex
+      for choiceIndex = 1, table_getn(list) do
+        if list[choiceIndex].value == current then index = choiceIndex end
       end
       index = index + delta
       if index > table_getn(list) then index = 1 elseif index < 1 then index = table_getn(list) end
@@ -475,9 +469,9 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
 
     local function currentIndex()
       local current = get()
-      local i
-      for i = 1, table_getn(choices) do
-        if choices[i].value == current then return i end
+      local choiceIndex
+      for choiceIndex = 1, table_getn(choices) do
+        if choices[choiceIndex].value == current then return choiceIndex end
       end
     end
 
@@ -550,8 +544,8 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
       local current = get()
       ColorPickerFrame.previousValues = { r = current[1], g = current[2], b = current[3] }
       ColorPickerFrame.func = function()
-        local r, g, b = ColorPickerFrame:GetColorRGB()
-        set(r, g, b)
+        local red, green, blue = ColorPickerFrame:GetColorRGB()
+        set(red, green, blue)
         row.refresh()
         Skada:MarkDirty()
       end
@@ -635,10 +629,10 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
 
     local function applySelection(key)
       selectedKey = key
-      local i, button
-      for i = 1, table_getn(tabs) do
-        button = buttons[i]
-        if tabs[i].key == key then
+      local tabIndex, button
+      for tabIndex = 1, table_getn(tabs) do
+        button = buttons[tabIndex]
+        if tabs[tabIndex].key == key then
           button.text:SetTextColor(1, 1, 1, 1)
           button:SetBackdropColor(0.14, 0.16, 0.20, 1)
           button:SetBackdropBorderColor(HIGHLIGHT_COLOR[1], HIGHLIGHT_COLOR[2], HIGHLIGHT_COLOR[3], 0.9)
@@ -657,9 +651,9 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
       if strip.OnChange then strip.OnChange(key) end
     end
 
-    local i
-    for i = 1, table_getn(tabs) do
-      local spec = tabs[i]
+    local tabIndex
+    for tabIndex = 1, table_getn(tabs) do
+      local spec = tabs[tabIndex]
       local button = CreateFrame("Button", nil, strip)
       button:RegisterForClicks("LeftButtonUp")
       local width = max(72, (spec.label and (spec.label:len() * 7) or 40) + 24)
@@ -698,7 +692,7 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
           button:SetBackdropBorderColor(0.34, 0.37, 0.45, 1)
         end
       end)
-      buttons[i] = button
+      buttons[tabIndex] = button
     end
 
     function strip.SetSelected(self, key)
@@ -718,9 +712,6 @@ function OptionsWidgets.CreateKit(controls, rowWidth)
     local track = CreateFrame("Button", nil, bar)
     track:RegisterForClicks("LeftButtonUp")
     track:SetPoint("TOP", bar, "TOP", 0, 0)
-    -- The height must be set explicitly: thumb travel math reads GetHeight,
-    -- and a TOP/BOTTOM-anchored frame does not reliably report its resolved
-    -- height on the 1.12 client.
     track:SetHeight(viewport:GetHeight())
     track:SetWidth(6)
     track:SetBackdrop(trackBackdrop)

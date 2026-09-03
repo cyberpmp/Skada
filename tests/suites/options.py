@@ -9,12 +9,16 @@ def run(ctx: Context):
     assert skada.db.profile.fontName == "Interface\\AddOns\\Skada\\media\\Accidental Presidency.ttf"
     assert skada.db.profile.minimap.show is True
     assert skada.Options.minimapButton is not None
+    assert skada.db.profile.updateRate is None
+    assert skada.db.profile.smoothBars is None
+    assert skada.db.profile.barSpeed is None
 
     ctx.run(r'''
       Skada.Options:Open()
       assert(Skada.Options.frame and Skada.Options.frame:IsShown())
       assert(Skada.Options.title.textValue == "Skada")
-      assert(Skada.Options.statusText.textValue == "Core behavior and everyday conveniences.")
+      assert(Skada.Options.statusText.textValue ==
+        "Addon-wide behavior, appearance, data, and reset settings.")
       assert(Skada.Options.frame.backdropR == 0 and Skada.Options.frame.backdropA == 1)
       assert(Skada.Options.viewport.backdropA == 0.5 and Skada.Options.viewport.borderR == 0.4)
       assert(Skada.Options.treePanel.backdropA == 0.5 and Skada.Options.treePanel.borderR == 0.4)
@@ -22,10 +26,43 @@ def run(ctx: Context):
       assert(Skada.Options.scrollbar.width == 10)
       assert(Skada.Options.scrollbar.track.width == 6 and Skada.Options.scrollbar.thumb.width == 6)
       assert(not rawget(Skada.Options.scrollbar, "up") and not rawget(Skada.Options.scrollbar, "down"))
+      local treeNodes = Skada.OptionsShell.TreeNodes(Skada.Options)
+      local i
+      for i = 1, table.getn(treeNodes) do
+        if treeNodes[i].key == "windows" then
+          assert(treeNodes[i + 1] and treeNodes[i + 1].newWindow,
+            "+ New window must be the first item beneath Windows")
+          break
+        end
+      end
       Skada.Options:OpenPage("window")
       local windowSpec = Skada.OptionsSchema.pages.window.rows
-      assert(windowSpec and table.getn(windowSpec) == 40, "window page must hold every row")
+      local generalSpec = Skada.OptionsSchema.pages.general.rows
+      assert(table.getn(Skada.OptionsSchema.groups) == 2 and
+        Skada.OptionsSchema.pages.data == nil, "global Data page was not consolidated")
+      assert(windowSpec and table.getn(windowSpec) == 24, "window page must hold every per-window row")
+      assert(generalSpec and table.getn(generalSpec) == 28, "General page must hold every global row")
       assert(windowSpec[1].key == "combatHeader" and windowSpec[1].widget == "header")
+      local globalKeys = {
+        mergePets = true, trackAll = true, combatLogging = true, minimap = true,
+        windowBorderStyle = true, windowBorderColor = true, barTexture = true,
+        fontName = true, classColors = true, barColor = true, spellColors = true,
+        showClassIcons = true, classColorMenus = true, highlightSelf = true,
+        highlightSelfColor = true, barBorder = true, barBorderColor = true,
+        maxSegments = true, onlyBossFights = true, numberFormat = true,
+        resetData = true, resetOnEnterInstance = true, resetOnJoinGroup = true,
+        resetOnLeaveGroup = true,
+      }
+      local generalKeys = {}
+      for i = 1, table.getn(generalSpec) do generalKeys[generalSpec[i].key] = true end
+      local key
+      for key in pairs(globalKeys) do
+        assert(generalKeys[key], "global setting is missing from General: " .. key)
+      end
+      for i = 1, table.getn(windowSpec) do
+        assert(not globalKeys[windowSpec[i].key],
+          "global setting remains on a window page: " .. tostring(windowSpec[i].key))
+      end
       Skada.Options:OpenPage("general")
       local capturedScroll = -1
       local modernScroll = Skada.Options.kit.createScrollbar(Skada.Options.frame,
@@ -75,16 +112,30 @@ def run(ctx: Context):
 
       assert(Skada.Options.currentPage == "general")
       local generalPage = Skada.Options.pageCache.general
-      assert(generalPage.description.textValue == "Core behavior and everyday conveniences.")
+      assert(generalPage.description.textValue ==
+        "Addon-wide behavior, appearance, data, and reset settings.")
       assert(generalPage.description:IsShown() and generalPage.rule:IsShown())
       assert(generalPage.content.alpha == 0.48 and rawget(generalPage.content, "OnUpdate"))
       generalPage.content.OnUpdate(generalPage.content, 0.11)
       assert(generalPage.content.alpha == 1 and not rawget(generalPage.content, "OnUpdate"))
-      Skada.Options:OpenPage("data")
-      assert(Skada.Options.currentPage == "data")
-      assert(not generalPage.description:IsShown() and not generalPage.rule:IsShown())
+      local globalPageRows = {}
+      local i
+      for i = 1, table.getn(generalPage.rows) do
+        local row = generalPage.rows[i]
+        if row.key then globalPageRows[row.key] = row end
+      end
+      assert(globalPageRows.behaviorHeader and globalPageRows.appearanceHeader and
+        globalPageRows.dataHeader and globalPageRows.policyHeader,
+        "General page is missing an ownership section")
+      for i = 1, 20 do Skada.Options.viewport.OnMouseWheel(nil, -1) end
+      assert(globalPageRows.resetOnLeaveGroup:IsShown(),
+        "bottom-most global reset setting is unreachable")
+      assert(not globalPageRows.behaviorHeader:IsShown(),
+        "General rows scrolled past the header band did not hide")
+      Skada.OptionsShell.ApplyScroll(Skada.Options, 0)
       Skada.Options:OpenPage("window")
       assert(Skada.Options.currentPage == "window")
+      assert(not generalPage.description:IsShown() and not generalPage.rule:IsShown())
       Skada.Options:OpenPage("general")
 
       local i, control
@@ -295,8 +346,14 @@ def run(ctx: Context):
       rowForKey.name.setValue("My meter")
       assert(auto.db.name == "My meter" and auto.db.nameIsCustom,
         "manual rename did not mark the window as custom-named")
+      auto:Refresh()
+      assert(auto.title.textValue == "My meter",
+        "refresh did not paint a custom window title")
       pickDropdown(rowForKey.mode, "threat")
       assert(auto.db.name == "My meter", "mode switch clobbered a custom window name")
+      auto:Refresh()
+      assert(auto.title.textValue == "My meter",
+        "dynamic live-mode title replaced a custom window title")
       assert(Skada.UI:DeleteWindow(auto), "temporary window cleanup failed")
       Skada.Options:SelectWindow(second)
 
@@ -307,18 +364,27 @@ def run(ctx: Context):
       pickDropdown(rowForKey.segment, "current")
       assert(second.db.segment == "current", second.db.segment)
 
-      assert(rowForKey.windowBorderStyle and rowForKey.windowBorderColor,
-        "window border controls missing from the window page")
-      pickDropdown(rowForKey.windowBorderStyle, "solid")
+      assert(not rowForKey.windowBorderStyle and not rowForKey.windowBorderColor,
+        "global border controls leaked onto the window page")
+      Skada.Options:OpenPage("general")
+      local generalRowForKey = {}
+      for i = 1, table.getn(Skada.Options.pageCache.general.rows) do
+        local row = Skada.Options.pageCache.general.rows[i]
+        if row.key then generalRowForKey[row.key] = row end
+      end
+      assert(generalRowForKey.windowBorderStyle and generalRowForKey.windowBorderColor,
+        "global border controls are missing from General")
+      pickDropdown(generalRowForKey.windowBorderStyle, "solid")
       assert(Skada.db.profile.windowBorderStyle == "solid" and
         not Skada.db.profile.hideWindowBorder,
         "solid window border choice was not saved")
-      pickDropdown(rowForKey.windowBorderStyle, "none")
+      pickDropdown(generalRowForKey.windowBorderStyle, "none")
       assert(Skada.db.profile.hideWindowBorder,
         "borderless choice did not preserve the legacy setting")
-      pickDropdown(rowForKey.windowBorderStyle, "solid")
+      pickDropdown(generalRowForKey.windowBorderStyle, "solid")
       assert(Skada.db.profile.windowBorderStyle == "solid" and
         not Skada.db.profile.hideWindowBorder)
+      Skada.Options:OpenPage("window")
 
       assert(rowForKey.hideTitle and rowForKey.combatMode and rowForKey.returnAfterCombat,
         "hide-title and combat-switch rows missing from the window page")
@@ -426,7 +492,7 @@ def run(ctx: Context):
       profile.numberFormat = "compact"
       assert(Skada:FormatNumber(12345) == "12k")
 
-      Skada.Options:OpenPage("data")
+      Skada.Options:OpenPage("general")
       local numberRow
       for i = 1, table.getn(Skada.Options.controls) do
         local row = Skada.Options.controls[i]
@@ -453,8 +519,8 @@ def run(ctx: Context):
         "history was not trimmed to the slider value")
 
       local resetRow
-      for i = 1, table.getn(Skada.Options.pageCache.data.rows) do
-        local row = Skada.Options.pageCache.data.rows[i]
+      for i = 1, table.getn(Skada.Options.pageCache.general.rows) do
+        local row = Skada.Options.pageCache.general.rows[i]
         if rawget(row, "key") == "resetData" then resetRow = row break end
       end
       assert(resetRow, "reset data action row not found")

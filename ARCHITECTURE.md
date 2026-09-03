@@ -55,7 +55,10 @@ explicit.
 1. `combat/combat.parser.lua` compiles client combat formats once and routes
    only the chat events on which each format can occur.
 2. Tracking services enrich sparse text with spell IDs, GUIDs, aura sources,
-   dispel snapshots, interrupt casts, and last-hit evidence.
+   dispel snapshots, interrupt casts, and last-hit evidence. Ambient aura events
+   coalesce into a bounded queue that scans one unit per tracking tick; segment
+   start queues only unseen group, target, and focus units instead of
+   synchronously enumerating a full roster on the pull path.
 3. `data/data.lua` normalizes accepted facts and delegates mutations to
    `data/data.aggregator.lua` for both Current and Overall sets.
 4. `modes/modes.lua` projects actor and detail fields without mutating the
@@ -83,6 +86,7 @@ Internal messages are synchronous and registration-order dependent:
 | Message | Publisher | Consumers |
 | --- | --- | --- |
 | `combatStateChanged(inCombat)` | Segment state machine | Window auto-switching and threat-estimate lifecycle |
+| `segmentStarted(segment, now)` | Segment state machine | Queue unseen aura baselines |
 | `segmentArchived(data, segment)` | Segment state machine | Numeric history-selection migration |
 | `dataReset()` | Data facade | Window view reset and threat-estimate reset |
 | `damageRecorded(...)` | Data facade | Local threat estimator |
@@ -140,16 +144,19 @@ and must never fail the event handler.
 
 ### Rendering
 
-Core tickers run independently of display rebuilding. A full rebuild occurs at
-the configured refresh interval when data is dirty or a visible live view needs
-updates. Bar easing may continue between rebuilds without sorting, formatting,
-or allocating display entries.
+Core tickers run independently of display rebuilding and are scanned only when
+the shortest registered ticker interval is due. A full rebuild occurs at a
+fixed 250 ms cadence when data is dirty or a visible time-dependent view needs
+clock updates. Raw-value views remain idle during quiet combat. Bars always
+ease at fixed speed 5 between rebuilds without sorting, formatting, allocating
+display entries, or reading the clock; only windows with visible movement are
+visited.
 
 Three signals remain separate:
 
 - `Skada.dirty` requests content reconstruction.
 - `window.layoutDirty` requests geometry and typography updates.
-- `UI.animateUntil` keeps one-off easing active briefly after a rebuild.
+- `UI.hasActiveAnimations` keeps easing active until subpixel movement ends.
 
 Hidden windows do not request continuous rendering.
 
@@ -171,8 +178,9 @@ settings that intentionally apply to every window remain on the global profile.
 `options/options.lua` owns selection and the page cache.
 
 Rows must derive their state from `get` functions during `refresh`; cached rows
-must not retain a particular window. Per-window setters resolve the currently
-selected window at invocation time.
+must not retain a particular window. General owns every global-profile control.
+Window pages contain only per-window controls, whose setters resolve the
+currently selected window at invocation time.
 
 ## Extending the addon
 

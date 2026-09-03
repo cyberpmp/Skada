@@ -52,13 +52,13 @@ function Options:CycleWindow(delta)
   local count = table_getn(windows)
   if count == 0 then return end
   local current = self:GetCurrentWindow()
-  local i, index
-  for i = 1, count do
-    if windows[i] == current then index = i break end
+  local windowIndex, currentIndex
+  for windowIndex = 1, count do
+    if windows[windowIndex] == current then currentIndex = windowIndex break end
   end
-  index = (index or (delta > 0 and 0 or count + 1)) + delta
-  if index > count then index = 1 elseif index < 1 then index = count end
-  self:SelectWindow(windows[index])
+  currentIndex = (currentIndex or (delta > 0 and 0 or count + 1)) + delta
+  if currentIndex > count then currentIndex = 1 elseif currentIndex < 1 then currentIndex = count end
+  self:SelectWindow(windows[currentIndex])
 end
 
 function Options:BuildPanel()

@@ -27,9 +27,9 @@ minimal presentation.
 
 ### Configure each window in-game
 
-The native settings panel gives every meter its own appearance, mode, data
-source, automatic switching, and layout options. Changes apply immediately,
-without an external configuration framework.
+The native settings panel separates addon-wide appearance and data behavior
+from each meter's mode, data source, automatic switching, and layout options.
+Changes apply immediately, without an external configuration framework.
 
 <p align="center">
   <a href="docs/images/skada-settings.png">
@@ -57,7 +57,10 @@ without an external configuration framework.
 
 - Live, target-specific Threat API v4 data from the OctoWoW server.
 - Threat rank, aggro percentage, tank status, range state, and derived TPS.
+- Threat rows follow the damage layout: threat `(TPS, aggro percentage)`.
 - A clearly marked local estimate when a server reply is unavailable.
+- Outside groups, only you and your pets appear in the estimate; threat
+  queries are not sent while ungrouped.
 - Player pinning when the server returns more rows than a window can display.
 
 Threat is a live snapshot. It is intentionally unavailable for Overall and
@@ -70,8 +73,8 @@ saved-fight segments.
 - Optional per-window combat mode switching (for example Threat in combat,
   Damage done out of combat) and a hideable title bar that collapses the
   window to its bars.
-- Smooth bars, class colors and icons, spell colors, custom textures and fonts,
-  configurable window and row borders, and self highlighting.
+- Always-smooth bars, class colors and icons, spell colors, custom textures and
+  fonts, configurable window and row borders, and self highlighting.
 - A native settings panel and draggable minimap button; no Ace or display
   libraries are loaded at runtime.
 - Chat reports to Guild, Party/Raid, Say, or Whisper.
@@ -125,16 +128,13 @@ size matching behavior are configured per window.
 
 ## Settings
 
-The settings panel applies changes immediately and is organized into three
+The settings panel applies changes immediately and is organized into two
 areas:
 
-- **General** controls pet merging, nearby-source tracking, combat logging,
-  and the minimap button.
-- **Data** controls refresh rate, fight-history length, boss-only retention,
-  number formatting, full data reset, and context-based reset policies.
-- **Windows** contains one entry per meter window. Its Design, Text & Color,
-  and Mode & Data tabs control presentation and the selected window's data
-  source.
+- **General** contains every addon-wide behavior, appearance, data-retention,
+  formatting, and reset setting.
+- **Windows** contains one entry per meter window and only controls that
+  window's behavior, dimensions, typography, mode, segment, and snapping.
 
 Reset policies can ask, always reset, or never reset when entering an instance,
 joining a group, or leaving a group. Skada never applies an automatic reset

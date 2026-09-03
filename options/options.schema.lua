@@ -6,8 +6,8 @@ Skada.OptionsSchema = Schema
 local floor = math.floor
 local type = type
 local tostring = tostring
-local string_format = string.format
 local table_getn = table.getn
+local table_insert = table.insert
 
 Schema.fontChoices = {
   { value = "Interface\\AddOns\\Skada\\media\\Accidental Presidency.ttf", label = "Accidental Presidency" },
@@ -54,10 +54,10 @@ end
 function Schema:ModeChoices()
   local choices = {}
   local list = Skada.Modes and Skada.Modes.list or {}
-  local i, mode
-  for i = 1, table_getn(list) do
-    mode = list[i]
-    choices[table_getn(choices) + 1] = { value = mode.key, label = mode.title }
+  local modeIndex, mode
+  for modeIndex = 1, table_getn(list) do
+    mode = list[modeIndex]
+    table_insert(choices, { value = mode.key, label = mode.title })
   end
   return choices
 end
@@ -74,10 +74,10 @@ function Schema:SegmentChoices()
   local history = Skada.Data.history or {}
   local historyIndex
   for historyIndex = 1, table_getn(history) do
-    choices[table_getn(choices) + 1] = {
+    table_insert(choices, {
       value = historyIndex,
       label = Skada.Data:GetSegmentLabel(historyIndex),
-    }
+    })
   end
   return choices
 end
@@ -101,11 +101,9 @@ function Schema.RenameSet()
     local window = Skada.Options and Skada.Options:GetCurrentWindow()
     if not window or not value or value == "" then return end
     window.db.name = value
-    -- a hand-set name is the user's own; the mode switcher must not take it back
     window.db.nameIsCustom = true
     if window.title then window.title:SetText(value) end
     if Skada.Options.frame and Skada.OptionsShell then
-      -- the tree reads db.name at build time; keep its label current
       Skada.OptionsShell.RebuildTree(Skada.Options)
     end
     Skada:MarkDirty()
@@ -121,21 +119,20 @@ Schema.resetPolicyChoices = {
 Schema.groups = {
   { key = "general", label = "General", page = "general" },
   { key = "windows", label = "Windows" },
-  { key = "data", label = "Data", page = "data" },
 }
 
 function Schema:WindowNodes()
   local nodes = {}
   local windows = Skada.UI and Skada.UI.windows or {}
-  local i, window
-  for i = 1, table_getn(windows) do
-    window = windows[i]
-    nodes[table_getn(nodes) + 1] = {
+  local windowIndex, window
+  for windowIndex = 1, table_getn(windows) do
+    window = windows[windowIndex]
+    table_insert(nodes, {
       key = "windowNode:" .. tostring(window.db.id),
       label = window.db.name or ("Window " .. tostring(window.db.id)),
       page = "window",
       window = window,
-    }
+    })
   end
   return nodes
 end
@@ -144,6 +141,7 @@ Schema.pages = {
   general = {
     title = "General",
     rows = {
+      { key = "behaviorHeader", widget = "header", label = "Behavior" },
       {
         key = "mergePets", widget = "checkbox",
         label = "Merge pets into owners",
@@ -182,24 +180,118 @@ Schema.pages = {
           end
         end,
       },
-    },
-  },
-
-  data = {
-    title = "Data",
-    rows = {
+      { key = "appearanceHeader", widget = "header", label = "Global Appearance" },
       {
-        key = "updateRate", widget = "slider",
-        label = "Update rate",
-        description = "How often window contents rebuild. Higher rates are smoother and use more CPU time.",
-        min = 0.1, max = 1, step = 0.05,
-        format = function(value)
-          if value <= 0 then return "0.0 Hz" end
-          return string_format("%.1f Hz", 1 / value)
+        key = "windowBorderStyle", widget = "dropdown",
+        label = "Window border style",
+        description = "Choose the soft shadow, plain solid edge, or no border used by every window.",
+        choices = Skada.UIStyle.WINDOW_BORDER_STYLES,
+        get = function()
+          if Skada.db.profile.hideWindowBorder then return "none" end
+          return Skada.db.profile.windowBorderStyle or "solid"
         end,
-        get = function() return Skada.db.profile.updateRate end,
-        set = Schema.globalSet("updateRate"),
+        set = function(value)
+          Skada.db.profile.windowBorderStyle = value
+          Skada.db.profile.hideWindowBorder = value == "none"
+          Skada.UI:MarkLayouts()
+          Skada:MarkDirty()
+        end,
       },
+      {
+        key = "windowBorderColor", widget = "swatch",
+        label = "Window border color",
+        description = "Color of the thin window edge used by every window.",
+        get = function() return Skada.db.profile.windowBorderColor end,
+        set = function(red, green, blue)
+          Skada.db.profile.windowBorderColor = { red, green, blue }
+          Skada.UI:MarkLayouts()
+          Skada:MarkDirty()
+        end,
+      },
+      {
+        key = "barTexture", widget = "dropdown",
+        label = "Bar texture",
+        description = "Texture used for colored fills and their dark backgrounds in every window.",
+        choices = Skada.UIStyle.BAR_TEXTURES,
+        get = function() return Skada.db.profile.barTexture or "flat" end,
+        set = Schema.AppearanceSet("barTexture", false),
+      },
+      {
+        key = "fontName", widget = "dropdown",
+        label = "Bar font",
+        description = "Font used by every Skada window.",
+        choices = Schema.fontChoices,
+        get = function() return Skada.db.profile.fontName end,
+        set = function(value)
+          Skada.db.profile.fontName = value
+          Skada.UI:MarkLayouts()
+          Skada:MarkDirty()
+        end,
+      },
+      {
+        key = "classColors", widget = "checkbox",
+        label = "Use class colors",
+        description = "Color bars by class in every window; when off, use the custom color below.",
+        get = function() return Skada.db.profile.classColors ~= false end,
+        set = Schema.globalSet("classColors"),
+      },
+      {
+        key = "barColor", widget = "swatch",
+        label = "Custom bar color",
+        description = "Bar color used by every window when class colors are off.",
+        get = function() return Skada.db.profile.barColor end,
+        set = function(red, green, blue) Skada.db.profile.barColor = { red, green, blue } end,
+      },
+      {
+        key = "spellColors", widget = "checkbox",
+        label = "Color spell breakdowns",
+        description = "Give spell rows distinct colors in every window.",
+        get = function() return Skada.db.profile.spellColors ~= false end,
+        set = Schema.AppearanceSet("spellColors", false),
+      },
+      {
+        key = "showClassIcons", widget = "checkbox",
+        label = "Show class icons",
+        description = "Show class icons before player names in every window.",
+        get = function() return Skada.db.profile.showClassIcons and true or false end,
+        set = Schema.AppearanceSet("showClassIcons", false),
+      },
+      {
+        key = "classColorMenus", widget = "checkbox",
+        label = "Class-colored chrome",
+        description = "Tint header controls and selected window edges with your class color.",
+        get = function() return Skada.db.profile.classColorMenus and true or false end,
+        set = Schema.AppearanceSet("classColorMenus", true),
+      },
+      {
+        key = "highlightSelf", widget = "checkbox",
+        label = "Highlight my bar",
+        description = "Draw a separate colored border around your row in every window.",
+        get = function() return Skada.db.profile.highlightSelf and true or false end,
+        set = Schema.AppearanceSet("highlightSelf", false),
+      },
+      {
+        key = "highlightSelfColor", widget = "swatch",
+        label = "My bar highlight color",
+        description = "Border color used to identify your own row in every window.",
+        get = function() return Skada.db.profile.highlightSelfColor end,
+        set = function(red, green, blue) Skada.db.profile.highlightSelfColor = { red, green, blue } end,
+      },
+      {
+        key = "barBorder", widget = "checkbox",
+        label = "Show bar borders",
+        description = "Draw a thin border around every visible row in every window.",
+        get = function() return Skada.db.profile.barBorder and true or false end,
+        set = Schema.AppearanceSet("barBorder", false),
+      },
+      {
+        key = "barBorderColor", widget = "swatch",
+        label = "Bar border color",
+        description = "Border color used for normal rows in every window.",
+        get = function() return Skada.db.profile.barBorderColor end,
+        set = function(red, green, blue) Skada.db.profile.barBorderColor = { red, green, blue } end,
+      },
+      { key = "dataHeader", widget = "header", label = "Data" },
       {
         key = "maxSegments", widget = "slider",
         label = "Saved fights",
@@ -287,8 +379,8 @@ Schema.pages = {
             choices = function()
               local choices = { { value = "", label = "None" } }
               local modes = Schema:ModeChoices()
-              local i
-              for i = 1, table_getn(modes) do choices[table_getn(choices) + 1] = modes[i] end
+              local modeIndex
+              for modeIndex = 1, table_getn(modes) do table_insert(choices, modes[modeIndex]) end
               return choices
             end,
             get = Schema.WindowGet("combatMode"),
@@ -397,72 +489,6 @@ Schema.pages = {
             set = Schema.WindowSet("windowOpacity", true),
           },
           {
-            key = "windowBorderStyle", widget = "dropdown",
-            label = "Window border style",
-            description = "Choose a soft shadow, a plain solid edge, or no window border.",
-            choices = Skada.UIStyle.WINDOW_BORDER_STYLES,
-            get = function()
-              if Skada.db.profile.hideWindowBorder then return "none" end
-              return Skada.db.profile.windowBorderStyle or "solid"
-            end,
-            set = function(value)
-              Skada.db.profile.windowBorderStyle = value
-              Skada.db.profile.hideWindowBorder = value == "none"
-              Skada.UI:MarkLayouts()
-              Skada:MarkDirty()
-            end,
-          },
-          {
-            key = "windowBorderColor", widget = "swatch",
-            label = "Window border color",
-            description = "Color of the thin window edge in soft-shadow and solid styles.",
-            get = function() return Skada.db.profile.windowBorderColor end,
-            set = function(r, g, b)
-              Skada.db.profile.windowBorderColor = { r, g, b }
-              Skada.UI:MarkLayouts()
-              Skada:MarkDirty()
-            end,
-          },
-          {
-            key = "smoothBars", widget = "checkbox",
-            label = "Smooth bar animation",
-            description = "Glide bar fills toward new totals instead of snapping immediately.",
-            get = function() return Skada.db.profile.smoothBars ~= false end,
-            set = Schema.AppearanceSet("smoothBars", false),
-          },
-          {
-            key = "barSpeed", widget = "slider",
-            label = "Bar animation speed",
-            description = "How quickly smooth bars catch up to their newest values.",
-            min = 1, max = 10, step = 1,
-            format = function(value) return tostring(floor(value)) end,
-            get = function() return Skada.db.profile.barSpeed or 8 end,
-            set = Schema.AppearanceSet("barSpeed", false),
-          },
-      {
-        key = "textHeader", widget = "header", label = "Text & Color",
-      },
-          {
-            key = "barTexture", widget = "dropdown",
-            label = "Bar texture",
-            description = "Texture used for colored fills and their dark unfilled backgrounds.",
-            choices = Skada.UIStyle.BAR_TEXTURES,
-            get = function() return Skada.db.profile.barTexture or "flat" end,
-            set = Schema.AppearanceSet("barTexture", false),
-          },
-          {
-            key = "fontName", widget = "dropdown",
-            label = "Bar font",
-            description = "Font used by all Skada windows.",
-            choices = Schema.fontChoices,
-            get = function() return Skada.db.profile.fontName end,
-            set = function(value)
-              Skada.db.profile.fontName = value
-              Skada.UI:MarkLayouts()
-              Skada:MarkDirty()
-            end,
-          },
-          {
             key = "fontSize", widget = "slider",
             label = "Font size",
             description = "Row text size for the selected window.",
@@ -471,73 +497,8 @@ Schema.pages = {
             get = Schema.WindowGet("fontSize"),
             set = Schema.WindowSet("fontSize", true),
           },
-          {
-            key = "classColors", widget = "checkbox",
-            label = "Use class colors",
-            description = "Color bars by class; when off, all bars use the color swatch below.",
-            get = function() return Skada.db.profile.classColors ~= false end,
-            set = Schema.globalSet("classColors"),
-          },
-          {
-            key = "barColor", widget = "swatch",
-            label = "Custom bar color",
-            description = "Bar color used when class colors are off.",
-            get = function() return Skada.db.profile.barColor end,
-            set = function(r, g, b)
-              Skada.db.profile.barColor = { r, g, b }
-            end,
-          },
-          {
-            key = "spellColors", widget = "checkbox",
-            label = "Color spell breakdowns",
-            description = "Give each spell row a distinct color instead of reusing the actor's class color.",
-            get = function() return Skada.db.profile.spellColors ~= false end,
-            set = Schema.AppearanceSet("spellColors", false),
-          },
-          {
-            key = "showClassIcons", widget = "checkbox",
-            label = "Show class icons",
-            description = "Show a class icon before player names on the main meter.",
-            get = function() return Skada.db.profile.showClassIcons and true or false end,
-            set = Schema.AppearanceSet("showClassIcons", false),
-          },
-          {
-            key = "classColorMenus", widget = "checkbox",
-            label = "Class-colored chrome",
-            description = "Tint header controls and the active window edge with your class color.",
-            get = function() return Skada.db.profile.classColorMenus and true or false end,
-            set = Schema.AppearanceSet("classColorMenus", true),
-          },
-          {
-            key = "highlightSelf", widget = "checkbox",
-            label = "Highlight my bar",
-            description = "Draw a separate colored border around your own meter row.",
-            get = function() return Skada.db.profile.highlightSelf and true or false end,
-            set = Schema.AppearanceSet("highlightSelf", false),
-          },
-          {
-            key = "highlightSelfColor", widget = "swatch",
-            label = "My bar highlight color",
-            description = "Border color used to pick your own row out at a glance.",
-            get = function() return Skada.db.profile.highlightSelfColor end,
-            set = function(r, g, b) Skada.db.profile.highlightSelfColor = { r, g, b } end,
-          },
-          {
-            key = "barBorder", widget = "checkbox",
-            label = "Show bar borders",
-            description = "Draw a thin border around every visible meter row.",
-            get = function() return Skada.db.profile.barBorder and true or false end,
-            set = Schema.AppearanceSet("barBorder", false),
-          },
-          {
-            key = "barBorderColor", widget = "swatch",
-            label = "Bar border color",
-            description = "Border color used for normal rows; your personal highlight takes priority.",
-            get = function() return Skada.db.profile.barBorderColor end,
-            set = function(r, g, b) Skada.db.profile.barBorderColor = { r, g, b } end,
-          },
       {
-        key = "modeHeader", widget = "header", label = "Mode & Data",
+        key = "modeHeader", widget = "header", label = "Mode & Segment",
       },
           {
             key = "mode", widget = "dropdown",
@@ -554,7 +515,6 @@ Schema.pages = {
               local _, renamed = Skada.Modes:Set(value, window)
               if Skada.Options.frame then
                 Skada.Options:RefreshPage()
-                -- auto-named windows rename with the mode; keep the tree label current
                 if renamed and Skada.OptionsShell then Skada.OptionsShell.RebuildTree(Skada.Options) end
               end
             end,

@@ -9,6 +9,7 @@ local wipeTable = Common.Wipe
 local type = type
 local tostring = tostring
 local table_getn = table.getn
+local table_insert = table.insert
 
 local function setSegmentChoice(target, index, value, label, segment)
   local choice = target[index]
@@ -64,12 +65,13 @@ function DataNavigation:CycleSegment(direction, window)
   local choices = self.cycleValues or {}
   self.cycleValues = choices
   wipeTable(choices)
-  local i
-  for i = 1, table_getn(entries) do choices[i] = entries[i].value end
+  local entryIndex
+  for entryIndex = 1, table_getn(entries) do table_insert(choices, entries[entryIndex].value) end
   local config = window and window.db or Skada.db.profile
   local currentIndex = 1
-  for i = 1, table_getn(choices) do
-    if choices[i] == config.segment then currentIndex = i break end
+  local choiceIndex
+  for choiceIndex = 1, table_getn(choices) do
+    if choices[choiceIndex] == config.segment then currentIndex = choiceIndex break end
   end
   currentIndex = currentIndex + (direction or 1)
   if currentIndex > table_getn(choices) then currentIndex = 1 end
@@ -94,21 +96,21 @@ end
 
 Skada:Subscribe("segmentArchived", function(data)
   local windows = Skada.db.profile.windows
-  local i, selected
+  local windowIndex, selectedSegment
   if windows and table_getn(windows) > 0 then
-    for i = 1, table_getn(windows) do
-      selected = windows[i].segment
-      if type(selected) == "number" then windows[i].segment = selected + 1 end
+    for windowIndex = 1, table_getn(windows) do
+      selectedSegment = windows[windowIndex].segment
+      if type(selectedSegment) == "number" then windows[windowIndex].segment = selectedSegment + 1 end
     end
   else
-    selected = Skada.db.profile.segment
-    if type(selected) == "number" then Skada.db.profile.segment = selected + 1 end
+    selectedSegment = Skada.db.profile.segment
+    if type(selectedSegment) == "number" then Skada.db.profile.segment = selectedSegment + 1 end
   end
   if windows and table_getn(windows) > 0 then
-    for i = 1, table_getn(windows) do
-      selected = windows[i].segment
-      if type(selected) == "number" and not data.history[selected] then
-        windows[i].segment = "current"
+    for windowIndex = 1, table_getn(windows) do
+      selectedSegment = windows[windowIndex].segment
+      if type(selectedSegment) == "number" and not data.history[selectedSegment] then
+        windows[windowIndex].segment = "current"
       end
     end
     Skada.db.profile.segment = windows[1].segment

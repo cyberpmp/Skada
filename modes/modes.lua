@@ -6,6 +6,7 @@ Skada.Modes = Modes
 local max = math.max
 local min = math.min
 local table_getn = table.getn
+local table_insert = table.insert
 
 local DataNavigation = Skada.DataNavigation
 
@@ -27,7 +28,7 @@ local function formatPercentPart(value, total)
 end
 
 local function addMode(mode)
-  Modes.list[table_getn(Modes.list) + 1] = mode
+  table_insert(Modes.list, mode)
   Modes.byKey[mode.key] = mode
 end
 
@@ -60,29 +61,29 @@ function Modes:GetActorValue(mode, actor)
   return value
 end
 
-function Modes:GetSetTitle(mode, set)
+function Modes:GetSetTitle(mode, set, setDuration)
   if mode.live then return "" end
   local raw = set[mode.field] or 0
   if mode.uptime then
     local count = mode.countField and (set[mode.countField] or 0) or 0
-    return formatUptime(raw, Skada.Data:GetSetDuration(set), count)
+    return formatUptime(raw, setDuration or Skada.Data:GetSetDuration(set), count)
   end
   if mode.count then
     return formatCount(raw, mode.duration and (set.ccDuration or 0) or nil)
   end
   if mode.rate then
-    return Skada:FormatNumber(raw / max(1, Skada.Data:GetSetDuration(set)))
+    return Skada:FormatNumber(raw / max(1, setDuration or Skada.Data:GetSetDuration(set)))
   end
   return Skada:FormatNumber(raw)
 end
 
-function Modes:GetActorText(mode, actor, set)
+function Modes:GetActorText(mode, actor, set, setDuration)
   if mode.live then return "" end
   local raw = actor[mode.field] or 0
   local value = self:GetActorValue(mode, actor)
   if mode.uptime then
     local count = mode.countField and (actor[mode.countField] or 0) or 0
-    return formatUptime(raw, Skada.Data:GetSetDuration(set), count)
+    return formatUptime(raw, setDuration or Skada.Data:GetSetDuration(set), count)
   end
   if mode.count then
     return formatCount(raw, mode.duration and (actor.ccDuration or 0) or nil)
@@ -102,11 +103,11 @@ function Modes:GetDetailValue(mode, spell)
   return spell.amount or spell.count or 0
 end
 
-function Modes:GetDetailText(mode, spell, actor, set)
+function Modes:GetDetailText(mode, spell, actor, set, setDuration)
   if spell.customText then return spell.customText end
   local value = self:GetDetailValue(mode, spell)
   if mode.uptime then
-    local duration = set and Skada.Data:GetSetDuration(set) or 0
+    local duration = set and (setDuration or Skada.Data:GetSetDuration(set)) or 0
     local percent = duration > 0 and min(100, (spell.duration or 0) / duration * 100) or 0
     return string.format("%.1fs (%.0f%%) x%d", spell.duration or 0, percent, value)
   end
@@ -122,9 +123,9 @@ function Modes:Cycle(direction, window)
   local config = window and window.db or Skada.db.profile
   local current = config.mode
   local index = 1
-  local i
-  for i = 1, table_getn(self.list) do
-    if self.list[i].key == current then index = i break end
+  local modeIndex
+  for modeIndex = 1, table_getn(self.list) do
+    if self.list[modeIndex].key == current then index = modeIndex break end
   end
   index = index + (direction or 1)
   if index > table_getn(self.list) then index = 1 end
@@ -133,48 +134,42 @@ function Modes:Cycle(direction, window)
 end
 
 function Modes:IsTitle(name)
-  local i
-  for i = 1, table_getn(self.list) do
-    if name == self.list[i].title then return true end
+  local modeIndex
+  for modeIndex = 1, table_getn(self.list) do
+    if name == self.list[modeIndex].title then return true end
   end
   return false
 end
 
--- A window keeps its own name once the user has renamed it; auto-named
--- windows (name still matching a mode title, or created from a mode) follow
--- the mode so the settings tree and window list stay truthful.
 function Modes:IsAutoNamed(config)
   if config.nameIsCustom then return false end
   if config.name == nil then return true end
   return self:IsTitle(config.name)
 end
 
--- Sets the mode and returns found, renamed so callers can refresh tree
--- labels only when an auto-name actually followed the mode.
 function Modes:Set(value, window)
   if not value then return false, false end
   window = window or (Skada.UI and Skada.UI.GetActive and Skada.UI:GetActive())
   local config = window and window.db or Skada.db.profile
   local lowered = string.lower(value)
-  local i, mode
-  for i = 1, table_getn(self.list) do
-    mode = self.list[i]
+  local modeIndex, mode
+  for modeIndex = 1, table_getn(self.list) do
+    mode = self.list[modeIndex]
     if string.lower(mode.key) == lowered or string.lower(mode.title) == lowered then
       config.mode = mode.key
       if mode.live then config.segment = "current" end
       local renamed = false
       if window and window.db == config and self:IsAutoNamed(config) and config.name ~= mode.title then
         config.name = mode.title
-        if window.title then window.title:SetText(config.name) end
-        -- the settings tree reads db.name at build time; a rename triggered
-        -- from the meter or a combat mode switch must refresh it the same
-        -- way the settings-side callers do
+        if window.title then
+          window.title:SetText(config.name)
+          window.lastTitle = config.name
+        end
         Skada:Publish("windowListChanged", Skada.UI)
         renamed = true
       end
       if window and window.db == config and Skada.Data and Skada.Data.clientInCombat
           and mode.key ~= config.combatMode then
-        -- a mode picked by hand mid-fight wins over the pending combat restore
         window.restoreMode = nil
       end
       DataNavigation:OnModeChanged(window)

@@ -22,6 +22,7 @@ function DataSegments:StartSegment(now, targetName)
   self.active = true
   self.noCombatSince = nil
   self.nextBossTargetScan = nil
+  Skada:Publish("segmentStarted", self.current, now)
   Skada:MarkDirty()
   return self.current
 end
@@ -41,15 +42,15 @@ function DataSegments:EnsureSegment(now, targetName, mayStart)
   return self.current
 end
 
-function DataSegments:GetSetDuration(segment)
+function DataSegments:GetSetDuration(segment, now)
   if not segment then return 0 end
   if segment.isTotal then
     local duration = segment.duration
-    if self.active then duration = duration + max(0, GetTime() - self.current.startTime) end
+    if self.active then duration = duration + max(0, (now or GetTime()) - self.current.startTime) end
     return duration
   end
   if self.active and segment == self.current then
-    return max(0, GetTime() - segment.startTime)
+    return max(0, (now or GetTime()) - segment.startTime)
   end
   return segment.duration or 0
 end

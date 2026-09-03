@@ -28,10 +28,35 @@ def run(ctx: Context):
       assert(not rawget(Skada.UI:GetPrimary().frame, "skadaShadow"),
         "default bordered window created the grey outer glow")
       local originalCount = table.getn(Skada.tickers)
+      local originalMinimum = Skada.minimumTickerInterval
       local healthyCalls = 0
       Skada:RegisterTicker("test-failing", 0.01, function() error("expected ticker failure") end)
       Skada:RegisterTicker("test-healthy", 0.01, function() healthyCalls = healthyCalls + 1 end)
       Skada.frame.OnUpdate(Skada.frame, 0.02)
       assert(healthyCalls == 1, "a failing ticker prevented the next ticker from running")
-      while table.getn(Skada.tickers) > originalCount do table.remove(Skada.tickers) end
+      Skada:RegisterTicker("test-failing", 1, function() end)
+      Skada:RegisterTicker("test-healthy", 1, function() end)
+      local raisedMinimum = Skada.minimumTickerInterval
+      assert(raisedMinimum == originalMinimum,
+        "re-registering the shortest tickers did not raise the runtime minimum")
+      Skada:UnregisterTicker("test-failing")
+      Skada:UnregisterTicker("test-healthy")
+      assert(Skada.minimumTickerInterval == originalMinimum,
+        "unregistering a ticker did not recompute the runtime minimum")
+
+      local minimum = Skada.minimumTickerInterval
+
+      Skada.UI.hasActiveAnimations = false
+      Skada.frame.OnUpdate(Skada.frame, 1)
+      local realGetTime, clockReads = GetTime, 0
+      GetTime = function()
+        clockReads = clockReads + 1
+        return realGetTime()
+      end
+      local quietFrame = math.min(minimum, 0.25) / 20
+      for i = 1, 10 do Skada.frame.OnUpdate(Skada.frame, quietFrame) end
+      local observedClockReads = clockReads
+      GetTime = realGetTime
+      assert(observedClockReads == 0,
+        "core read the clock on render frames before any ticker or display work was due")
     ''')

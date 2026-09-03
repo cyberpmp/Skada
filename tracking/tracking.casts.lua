@@ -79,19 +79,19 @@ end
 
 function CastTracker:RecordRawDispel(targetName, auraName, now)
   now = now or GetTime()
-  local i
-  for i = table_getn(self.pendingDispels), 1, -1 do
-    local pending = self.pendingDispels[i]
+  local dispelIndex
+  for dispelIndex = table_getn(self.pendingDispels), 1, -1 do
+    local pending = self.pendingDispels[dispelIndex]
     if now <= pending.expires and (not pending.targetName or pending.targetName == targetName) then
       local auraID
       if pending.before then
-        local id, name
-        for id, name in pairs(pending.before) do
-          if name == auraName then auraID = type(id) == "number" and id or nil break end
+        local spellId, name
+        for spellId, name in pairs(pending.before) do
+          if name == auraName then auraID = type(spellId) == "number" and spellId or nil break end
         end
       end
       self:RecordDispel(pending, auraName, auraID, now)
-      if pending.count >= pending.maximum then table_remove(self.pendingDispels, i) end
+      if pending.count >= pending.maximum then table_remove(self.pendingDispels, dispelIndex) end
       return true
     end
   end
@@ -108,13 +108,13 @@ end
 
 function CastTracker:RecordRawInterrupt(sourceName, targetName, interruptedName, now)
   now = now or GetTime()
-  local i
-  for i = table_getn(self.pendingInterrupts), 1, -1 do
-    local pending = self.pendingInterrupts[i]
+  local interruptIndex
+  for interruptIndex = table_getn(self.pendingInterrupts), 1, -1 do
+    local pending = self.pendingInterrupts[interruptIndex]
     if now <= pending.expires and pending.sourceName == sourceName and
        (not pending.targetName or pending.targetName == targetName) then
       self:RecordInterrupt(sourceName, targetName, pending.abilityName, interruptedName, pending.spellID, now)
-      table_remove(self.pendingInterrupts, i)
+      table_remove(self.pendingInterrupts, interruptIndex)
       return true
     end
   end
@@ -177,12 +177,12 @@ end
 function CastTracker:OnSpellInterrupted(unit, castGUID, interruptedSpellID, interruptedName)
   local targetName = unit and UnitName(unit)
   local now = GetTime()
-  local i
-  for i = table_getn(self.pendingInterrupts), 1, -1 do
-    local pending = self.pendingInterrupts[i]
+  local interruptIndex
+  for interruptIndex = table_getn(self.pendingInterrupts), 1, -1 do
+    local pending = self.pendingInterrupts[interruptIndex]
     if now <= pending.expires and (not pending.targetName or pending.targetName == targetName) then
       self:RecordInterrupt(pending.sourceName, targetName, pending.abilityName, interruptedName, pending.spellID, now)
-      table_remove(self.pendingInterrupts, i)
+      table_remove(self.pendingInterrupts, interruptIndex)
       return
     end
   end

@@ -23,18 +23,40 @@ Style.HEADER_BUTTON_ALPHA = 0.82
 Style.MIN_WINDOW_WIDTH = 180
 Style.WINDOW_PADDING = 6
 Style.FOOTER_HEIGHT = 6
+Style.BAR_ANIMATION_SPEED = 5
+Style.BAR_EASE = 0.04 + Style.BAR_ANIMATION_SPEED * 0.025
 
 Style.WINDOW_R, Style.WINDOW_G, Style.WINDOW_B = 0.018, 0.021, 0.028
 Style.SURFACE_R, Style.SURFACE_G, Style.SURFACE_B = 0.045, 0.050, 0.064
 Style.ROW_R, Style.ROW_G, Style.ROW_B = 0.040, 0.044, 0.055
 Style.MUTED_R, Style.MUTED_G, Style.MUTED_B = 0.60, 0.63, 0.69
 Style.UI_ACCENT_R, Style.UI_ACCENT_G, Style.UI_ACCENT_B = 0.38, 0.61, 0.80
--- Settings-window palette: pane interiors/borders and the gold accents used
--- by the title medallion, live values, and selected tree rows.
 Style.PANE_BG_R, Style.PANE_BG_G, Style.PANE_BG_B, Style.PANE_BG_A = 0.1, 0.1, 0.1, 0.5
 Style.PANE_BORDER_R, Style.PANE_BORDER_G, Style.PANE_BORDER_B = 0.4, 0.4, 0.4
 Style.GOLD_R, Style.GOLD_G, Style.GOLD_B = 1, 0.82, 0
 Style.GOLD_BRIGHT_R, Style.GOLD_BRIGHT_G, Style.GOLD_BRIGHT_B = 1, 0.9, 0.2
+
+Style.DIALOG_HEADER_TEXTURE = "Interface\\DialogFrame\\UI-DialogBox-Header"
+
+Style.DIALOG_BACKDROP = {
+  bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+  edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+  tile = true, tileSize = 32, edgeSize = 32,
+  insets = { left = 8, right = 8, top = 8, bottom = 8 },
+}
+
+Style.PANE_BACKDROP = {
+  bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+  edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+  tile = true, tileSize = 16, edgeSize = 16,
+  insets = { left = 3, right = 3, top = 5, bottom = 3 },
+}
+
+Style.UI_FONT = "Fonts\\FRIZQT__.TTF"
+if GameFontNormal and GameFontNormal.GetFont then
+  local path = GameFontNormal:GetFont()
+  if type(path) == "string" then Style.UI_FONT = path end
+end
 
 Style.FLAT_BACKDROP = {
   bgFile = Style.WHITE,
@@ -116,12 +138,51 @@ function Style:GetAccentColor()
   return Skada:GetClassColor(class)
 end
 
-function Style:GetBarEase()
-  local profile = Skada.db and Skada.db.profile
-  if profile and profile.smoothBars == false then return 1 end
-  local speed = profile and tonumber(profile.barSpeed) or 8
-  speed = min(10, max(1, speed))
-  return 0.04 + speed * 0.025
+function Style.SetUIFont(fontString, size)
+  fontString:SetFont(Style.UI_FONT, size)
+end
+
+function Style:ApplyDialogFrame(frame)
+  frame:SetBackdrop(self.DIALOG_BACKDROP)
+  frame:SetBackdropColor(0, 0, 0, 1)
+end
+
+function Style:ApplyPane(frame, alpha)
+  frame:SetBackdrop(self.PANE_BACKDROP)
+  frame:SetBackdropColor(self.PANE_BG_R, self.PANE_BG_G, self.PANE_BG_B,
+    alpha or self.PANE_BG_A)
+  frame:SetBackdropBorderColor(self.PANE_BORDER_R, self.PANE_BORDER_G,
+    self.PANE_BORDER_B, 1)
+end
+
+function Style:CreateDialogTitle(frame, text)
+  local titleBackground = frame:CreateTexture(nil, "OVERLAY")
+  titleBackground:SetTexture(self.DIALOG_HEADER_TEXTURE)
+  titleBackground:SetWidth(100)
+  titleBackground:SetHeight(40)
+  titleBackground:SetPoint("TOP", frame, "TOP", 0, 12)
+  titleBackground:SetTexCoord(0.31, 0.67, 0, 0.63)
+
+  local titleBackgroundLeft = frame:CreateTexture(nil, "OVERLAY")
+  titleBackgroundLeft:SetTexture(self.DIALOG_HEADER_TEXTURE)
+  titleBackgroundLeft:SetWidth(30)
+  titleBackgroundLeft:SetHeight(40)
+  titleBackgroundLeft:SetPoint("TOPRIGHT", titleBackground, "TOPLEFT", 0, 0)
+  titleBackgroundLeft:SetTexCoord(0.21, 0.31, 0, 0.63)
+
+  local titleBackgroundRight = frame:CreateTexture(nil, "OVERLAY")
+  titleBackgroundRight:SetTexture(self.DIALOG_HEADER_TEXTURE)
+  titleBackgroundRight:SetWidth(30)
+  titleBackgroundRight:SetHeight(40)
+  titleBackgroundRight:SetPoint("TOPLEFT", titleBackground, "TOPRIGHT", 0, 0)
+  titleBackgroundRight:SetTexCoord(0.67, 0.77, 0, 0.63)
+
+  local title = frame:CreateFontString(nil, "OVERLAY")
+  title:SetPoint("TOP", titleBackground, "TOP", 0, -14)
+  self.SetUIFont(title, 12)
+  title:SetText(text)
+  title:SetTextColor(self.GOLD_R, self.GOLD_G, self.GOLD_B, 1)
+  return title
 end
 
 function Style:ApplyFlatFrame(frame, alpha, borderR, borderG, borderB)
@@ -148,40 +209,31 @@ function Style:ApplyShadow(frame, visible)
   end
 end
 
--- The window backdrop alone is invisible in practice: every row paints its
--- own dark texture over it, so the opacity setting has to reach that chrome
--- too or the slider appears to do nothing. 0% makes the whole window
--- background disappear and leaves only bars, text, and buttons. Per window.
-function Style:GetWindowOpacity(db)
-  local opacity = db and db.windowOpacity
+function Style:GetWindowOpacity(profile)
+  local opacity = profile and profile.windowOpacity
   if type(opacity) ~= "number" then return 0.9 end
   return max(0, min(1, opacity))
 end
 
--- The window fill as a plain texture: SetAlpha on it is the one transparency
--- path every client honors, so the opacity slider always has a visible effect.
 function Style:ApplyWindowBackground(frame, opacity)
-  local bg = rawget(frame, "skadaBg")
-  if not bg then
-    bg = frame:CreateTexture(nil, "BACKGROUND")
-    bg:SetTexture(self.WHITE)
-    bg:SetAllPoints(frame)
-    rawset(frame, "skadaBg", bg)
+  local backgroundTexture = rawget(frame, "skadaBg")
+  if not backgroundTexture then
+    backgroundTexture = frame:CreateTexture(nil, "BACKGROUND")
+    backgroundTexture:SetTexture(self.WHITE)
+    backgroundTexture:SetAllPoints(frame)
+    rawset(frame, "skadaBg", backgroundTexture)
   end
-  bg:SetVertexColor(self.WINDOW_R, self.WINDOW_G, self.WINDOW_B)
-  bg:SetAlpha(opacity)
-  return bg
+  backgroundTexture:SetVertexColor(self.WINDOW_R, self.WINDOW_G, self.WINDOW_B)
+  backgroundTexture:SetAlpha(opacity)
+  return backgroundTexture
 end
 
--- A backdrop edge can keep its default grey tint until the frame is touched
--- on some clients. Dedicated textures take their color immediately and do
--- not leave a phantom edge behind when borders are disabled.
-function Style:ApplyMeterBorder(frame, visible, r, g, b)
+function Style:ApplyMeterBorder(frame, visible, red, green, blue)
   local edges = rawget(frame, "skadaBorderEdges")
   if not visible then
     if edges then
-      local i
-      for i = 1, table_getn(edges) do edges[i]:Hide() end
+      local edgeIndex
+      for edgeIndex = 1, table_getn(edges) do edges[edgeIndex]:Hide() end
     end
     return
   end
@@ -209,15 +261,15 @@ function Style:ApplyMeterBorder(frame, visible, r, g, b)
 
     edges = { top, bottom, left, right }
     rawset(frame, "skadaBorderEdges", edges)
-    local i
-    for i = 1, table_getn(edges) do edges[i]:SetTexture(self.WHITE) end
+    local edgeIndex
+    for edgeIndex = 1, table_getn(edges) do edges[edgeIndex]:SetTexture(self.WHITE) end
   end
 
-  local i
-  for i = 1, table_getn(edges) do
-    edges[i]:SetVertexColor(r, g, b)
-    edges[i]:SetAlpha(1)
-    edges[i]:Show()
+  local edgeIndex
+  for edgeIndex = 1, table_getn(edges) do
+    edges[edgeIndex]:SetVertexColor(red, green, blue)
+    edges[edgeIndex]:SetAlpha(1)
+    edges[edgeIndex]:Show()
   end
 end
 
@@ -227,14 +279,10 @@ function Style:ApplyMeterWindow(frame, active, opacity)
   local hideBorder = borderStyle == "none"
   local color = profile.windowBorderColor or { 0.10, 0.11, 0.14 }
   local borderR, borderG, borderB = color[1] or 0.10, color[2] or 0.11, color[3] or 0.14
-  -- The configured edge color is stable across selection changes. Only the
-  -- explicit class-colored chrome option is allowed to tint an active edge.
   if active and borderStyle == "shadow" and profile.classColorMenus then
     borderR, borderG, borderB = self:GetAccentColor()
     borderR, borderG, borderB = borderR * 0.72, borderG * 0.72, borderB * 0.72
   end
-  -- The fill and edge are textures of their own; clear any legacy backdrop
-  -- so its default grey edge cannot flash or survive a reload.
   frame:SetBackdrop(nil)
   self:ApplyMeterBorder(frame, not hideBorder, borderR, borderG, borderB)
   self:ApplyWindowBackground(frame, opacity or 0.9)
@@ -245,23 +293,21 @@ function Style:ApplyHeader(window)
   if not window or not window.headerTexture then return end
   local profile = Skada.db.profile
   local active = window.manager and window.manager.visualActive == window
-  local r, g, b = 0.055, 0.060, 0.075
-  if active then r, g, b = 0.072, 0.078, 0.098 end
+  local red, green, blue = 0.055, 0.060, 0.075
+  if active then red, green, blue = 0.072, 0.078, 0.098 end
   if profile.classColorMenus then
-    local ar, ag, ab = self:GetAccentColor()
+    local accentRed, accentGreen, accentBlue = self:GetAccentColor()
     local strength = active and 0.18 or 0.11
-    r, g, b = r + ar * strength, g + ag * strength, b + ab * strength
+    red, green, blue = red + accentRed * strength, green + accentGreen * strength, blue + accentBlue * strength
   end
   local opacity = self:GetWindowOpacity(window.db)
   window.headerTexture:SetTexture(self.WHITE)
-  -- carry transparency through SetAlpha: some clients ignore the alpha
-  -- argument of SetVertexColor, and the dedicated method always works
-  window.headerTexture:SetVertexColor(r, g, b)
+  window.headerTexture:SetVertexColor(red, green, blue)
   window.headerTexture:SetAlpha(0.92 * opacity)
   if window.headerRule then
-    local rr, rg, rb = 0.34, 0.38, 0.47
-    if active and profile.classColorMenus then rr, rg, rb = self:GetAccentColor() end
-    window.headerRule:SetVertexColor(rr, rg, rb)
+    local ruleRed, ruleGreen, ruleBlue = 0.34, 0.38, 0.47
+    if active and profile.classColorMenus then ruleRed, ruleGreen, ruleBlue = self:GetAccentColor() end
+    window.headerRule:SetVertexColor(ruleRed, ruleGreen, ruleBlue)
     window.headerRule:SetAlpha((active and 0.52 or 0.20) * opacity)
   end
   if window.title then
@@ -278,12 +324,12 @@ function Style:ApplyButton(button, hovered)
   rawset(button, "skadaHovered", hovered and true or false)
   button:SetBackdrop(self.FLAT_BACKDROP)
   local active = rawget(button, "skadaActive")
-  local r, g, b
+  local red, green, blue
   if active then
-    r, g, b = rawget(button, "skadaActiveR") or 0.20,
+    red, green, blue = rawget(button, "skadaActiveR") or 0.20,
       rawget(button, "skadaActiveG") or 1,
       rawget(button, "skadaActiveB") or 0.20
-    button:SetBackdropColor(r * 0.11, g * 0.11, b * 0.11, 0.90)
+    button:SetBackdropColor(red * 0.11, green * 0.11, blue * 0.11, 0.90)
   elseif hovered then
     button:SetBackdropColor(0.14, 0.15, 0.18, 0.94)
   else
@@ -291,10 +337,10 @@ function Style:ApplyButton(button, hovered)
   end
 
   if active then
-    button:SetBackdropBorderColor(r, g, b, 0.72)
+    button:SetBackdropBorderColor(red, green, blue, 0.72)
   elseif Skada.db.profile.classColorMenus then
-    r, g, b = self:GetAccentColor()
-    button:SetBackdropBorderColor(r, g, b, hovered and 0.82 or 0.22)
+    red, green, blue = self:GetAccentColor()
+    button:SetBackdropBorderColor(red, green, blue, hovered and 0.82 or 0.22)
   elseif hovered then
     button:SetBackdropBorderColor(0.50, 0.55, 0.66, 0.92)
   else
@@ -304,7 +350,7 @@ function Style:ApplyButton(button, hovered)
   local label = rawget(button, "text")
   if label then
     if active then
-      label:SetTextColor(r, g, b, 1)
+      label:SetTextColor(red, green, blue, 1)
     elseif hovered then
       label:SetTextColor(1, 1, 1, 1)
     else
@@ -322,7 +368,7 @@ function Style:ApplyButton(button, hovered)
   local marker = rawget(button, "activeMarker")
   if marker then
     if active then
-      marker:SetVertexColor(r, g, b, 1)
+      marker:SetVertexColor(red, green, blue, 1)
       marker:Show()
     else
       marker:Hide()
@@ -350,11 +396,16 @@ function Style:FadeIn(frame, fromAlpha, duration, targetAlpha)
   end)
 end
 
-function Style:SetButtonActive(button, active, r, g, b)
+function Style:SetButtonActive(button, active, red, green, blue)
   if not button then return end
-  rawset(button, "skadaActive", active and true or false)
-  rawset(button, "skadaActiveR", r or 0.20)
-  rawset(button, "skadaActiveG", g or 1)
-  rawset(button, "skadaActiveB", b or 0.20)
+  active = active and true or false
+  red, green, blue = red or 0.20, green or 1, blue or 0.20
+  if rawget(button, "skadaActive") == active and
+      rawget(button, "skadaActiveR") == red and rawget(button, "skadaActiveG") == green and
+      rawget(button, "skadaActiveB") == blue then return end
+  rawset(button, "skadaActive", active)
+  rawset(button, "skadaActiveR", red)
+  rawset(button, "skadaActiveG", green)
+  rawset(button, "skadaActiveB", blue)
   self:ApplyButton(button, rawget(button, "skadaHovered"))
 end

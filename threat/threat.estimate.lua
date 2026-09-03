@@ -3,6 +3,7 @@ local Skada = (_G or getfenv(0)).Skada
 local ThreatEstimator = {
   threatByEnemyKey = {},
   enemyByKey = {},
+  enemyCount = 0,
   enemyKeyByName = {},
   damageMultiplierBySpellID = {},
   damageMultiplierBySpellName = {},
@@ -22,10 +23,13 @@ local pairs = pairs
 local table_getn = table.getn
 local table_sort = table.sort
 local string_find = string.find
+local setmetatable = setmetatable
 
 local ZERO_GUID_LONG = "0x0000000000000000"
 local ZERO_GUID_SHORT = "0x000000000"
 local NAME_PREFIX = "NAME:"
+
+local entryPoolsByOutput = setmetatable({}, { __mode = "k" })
 
 local SPELL_EFFECT_THREAT = 63
 local SPELL_EFFECT_THREAT_ALL = 91
@@ -111,6 +115,9 @@ end
 
 local function removeEnemyByKey(estimator, enemyKey)
   estimator.threatByEnemyKey[enemyKey] = nil
+  if estimator.enemyByKey[enemyKey] then
+    estimator.enemyCount = max(0, (estimator.enemyCount or 0) - 1)
+  end
   estimator.enemyByKey[enemyKey] = nil
   local enemyName, mappedKey
   for enemyName, mappedKey in pairs(estimator.enemyKeyByName) do
@@ -185,6 +192,7 @@ function ThreatEstimator:PromoteEnemyNameToGUID(enemyName, enemyGUID)
       enemy.lastSeen = namedEnemy.lastSeen
       enemy.name = namedEnemy.name or enemy.name
     end
+    if enemy then self.enemyCount = max(0, (self.enemyCount or 0) - 1) end
     self.enemyByKey[nameKey] = nil
   end
   self.enemyKeyByName[enemyName] = enemyGUID
@@ -235,6 +243,7 @@ function ThreatEstimator:RecordEnemyActivity(enemyKey, enemyName, timestamp)
   if not enemy then
     enemy = {}
     self.enemyByKey[enemyKey] = enemy
+    self.enemyCount = (self.enemyCount or 0) + 1
   end
   enemy.name = enemyName or enemy.name
   enemy.lastSeen = timestamp or GetTime()
@@ -287,9 +296,8 @@ function ThreatEstimator:RecordHealing(actorName, identity, amount, timestamp)
   if not actorName or amount <= 0 then return end
   self:ObserveCurrentEnemy(timestamp)
 
-  local enemyCount = 0
+  local enemyCount = self.enemyCount or 0
   local enemyKey
-  for enemyKey in pairs(self.enemyByKey) do enemyCount = enemyCount + 1 end
   if enemyCount == 0 then return end
 
   local threatPerEnemy = amount * 0.5 / enemyCount
@@ -384,6 +392,16 @@ function ThreatEstimator:RemoveEnemy(identifier)
   end
 end
 
+function ThreatEstimator:PruneActors(keepPredicate)
+  if not keepPredicate then return end
+  local enemyKey, enemyThreat, actorName
+  for enemyKey, enemyThreat in pairs(self.threatByEnemyKey) do
+    for actorName in pairs(enemyThreat) do
+      if not keepPredicate(actorName) then enemyThreat[actorName] = nil end
+    end
+  end
+end
+
 local function sortThreatDescending(left, right)
   if left.threat == right.threat then return left.name < right.name end
   return left.threat > right.threat
@@ -391,8 +409,14 @@ end
 
 function ThreatEstimator:Build(targetName, targetKey, output)
   output = output or {}
+  local pool = entryPoolsByOutput[output]
+  if not pool then
+    pool = {}
+    entryPoolsByOutput[output] = pool
+  end
   local outputIndex
   for outputIndex = 1, table_getn(output) do output[outputIndex] = nil end
+  if table.setn then table.setn(output, 0) end
 
   local enemyKey = self:FindRecordedEnemyKey(targetName, targetKey)
   local enemyThreat = enemyKey and self.threatByEnemyKey[enemyKey]
@@ -403,7 +427,11 @@ function ThreatEstimator:Build(targetName, targetKey, output)
   for actorName, actorThreat in pairs(enemyThreat) do
     if actorThreat.threat and actorThreat.threat > 0 then
       outputCount = outputCount + 1
-      local outputEntry = output[outputCount] or {}
+      local outputEntry = pool[outputCount]
+      if not outputEntry then
+        outputEntry = {}
+        pool[outputCount] = outputEntry
+      end
       outputEntry.name = actorName
       outputEntry.class = actorThreat.class or "OTHER"
       outputEntry.threat = actorThreat.threat
@@ -411,6 +439,7 @@ function ThreatEstimator:Build(targetName, targetKey, output)
       output[outputCount] = outputEntry
     end
   end
+  if table.setn then table.setn(output, outputCount) end
   table_sort(output, sortThreatDescending)
   if outputCount == 0 then return output, 0 end
 
@@ -426,6 +455,7 @@ function ThreatEstimator:Reset()
   wipeTable(self.threatByEnemyKey)
   wipeTable(self.enemyByKey)
   wipeTable(self.enemyKeyByName)
+  self.enemyCount = 0
 end
 
 Skada:Subscribe("damageRecorded", function(actorName, identity, targetName, amount, spellName, spellID, timestamp)

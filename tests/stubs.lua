@@ -1,12 +1,4 @@
--- WoW API stubs executed before the addon loads. Verbatim port of the former
--- STUBS block in tests/run_tests.py; harness.py executes this before Skada.toc.
 
--- The OctoWoW client is Lua 5.0, where table.getn trusts the out-of-band size
--- cache that table.insert/table.remove maintain (luaL_getn/luaL_setn in Lua
--- 5.0's lauxlib.c) ahead of the actual border. Manual appends bypass the
--- cache, so mixing `t[getn(t) + 1] = v` with table.remove silently truncates
--- getn's view of the list. Emulate that faithfully instead of letting Lua 5.4's
--- `#` mask it; see the create-after-delete regression in the options suite.
 do
   local sizes = setmetatable({}, { __mode = "k" })
   local function checkint(value)
@@ -26,20 +18,25 @@ do
     if checkint(rawget(t, "n")) then rawset(t, "n", n) else sizes[t] = n end
   end
   table.setn = setn
-  table.insert = function(t, first, second)
-    if second == nil then
+  table.insert = function(t, ...)
+    if select("#", ...) <= 1 then
       local n = table.getn(t)
-      t[n + 1] = first
+      local value = ...
+      t[n + 1] = value
       setn(t, n + 1)
     else
-      local n = table.getn(t)
-      for j = n, first, -1 do t[j + 1] = t[j] end
-      t[first] = second
-      setn(t, n + 1)
+      local pos, value = ...
+      local n = table.getn(t) + 1
+      if pos > n then n = pos end
+      local j
+      for j = n, pos + 1, -1 do t[j] = t[j - 1] end
+      t[pos] = value
+      setn(t, n)
     end
   end
   table.remove = function(t, index)
     local n = table.getn(t)
+    if n <= 0 then return end
     index = index or n
     local removed = t[index]
     local j
@@ -54,7 +51,7 @@ table.wipe = table.wipe or function(value) for key in pairs(value) do value[key]
 TestDropdownInfos = {}
 function UIDropDownMenu_CreateInfo() return {} end
 function UIDropDownMenu_AddButton(info, level)
-  TestDropdownInfos[table.getn(TestDropdownInfos) + 1] = info
+  table.insert(TestDropdownInfos, info)
 end
 function UIDropDownMenu_Initialize(frame, fn) frame.initialize = fn end
 function ToggleDropDownMenu() end
@@ -104,7 +101,9 @@ function UnitIsDead() return false end
 function UnitAffectingCombat() return inCombat end
 function UnitSpellTargetName() return UnitName("target") end
 function GetNumRaidMembers() return 0 end
-function GetNumPartyMembers() return 1 end
+local partyMemberCount = 1
+function TestSetPartyMembers(value) partyMemberCount = value end
+function GetNumPartyMembers() return partyMemberCount end
 function GetAddOnMetadata(addonName, field)
   if addonName == "Skada" and field == "Version" then return "1.0.0" end
 end
