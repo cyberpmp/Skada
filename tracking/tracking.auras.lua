@@ -10,7 +10,34 @@ local pairs = pairs
 local min = math.min
 local max = math.max
 local table_getn = table.getn
+local table_insert = table.insert
 local table_remove = table.remove
+
+function AuraScanner:QueueAuraBaseline(unit, unknownOnly, now)
+  if not self.auraAPI or not unit or not UnitExists(unit) then return end
+  if unknownOnly then
+    local guid = UnitGUID(unit)
+    local seen = guid and self.auraCacheSeen[guid]
+    if seen and (not now or now - seen <= 120) then return end
+  end
+  if self.pendingAuraBaselineUnits[unit] then return end
+  self.pendingAuraBaselineUnits[unit] = true
+  table_insert(self.pendingAuraBaselines, unit)
+end
+
+function AuraScanner:DrainAuraBaselines(now, budget)
+  local queue = self.pendingAuraBaselines
+  local queued = self.pendingAuraBaselineUnits
+  local scanned = 0
+  while scanned < (budget or 1) and table_getn(queue) > 0 do
+    local unit = table_remove(queue)
+    if queued[unit] then
+      queued[unit] = nil
+      self:ScanAll(unit, false, now)
+      scanned = scanned + 1
+    end
+  end
+end
 
 function AuraScanner:SnapshotAuras(unit, friendly, includeAll)
   if not self.auraAPI or not unit or not UnitExists(unit) then return nil end
@@ -22,12 +49,12 @@ function AuraScanner:SnapshotAuras(unit, friendly, includeAll)
     filter = includeAll and "HELPFUL" or "HELPFUL|DISPELLABLE"
   end
 
-  local i = 1
+  local auraSlotIndex = 1
   while true do
-    local name, _, _, _, _, _, _, _, _, spellID = C_UnitAuras.UnitAura(unit, i, filter)
+    local name, _, _, _, _, _, _, _, _, spellID = C_UnitAuras.UnitAura(unit, auraSlotIndex, filter)
     if not name then break end
     snapshot[spellID or name] = name
-    i = i + 1
+    auraSlotIndex = auraSlotIndex + 1
   end
   return snapshot
 end
@@ -68,10 +95,10 @@ function AuraScanner:ScanCC(unit, recordNew, now, targetGUID, targetName)
   wipeTable(self.seenAuras)
 
   targetName = targetName or UnitName(unit)
-  local i = 1
+  local auraSlotIndex = 1
   while true do
     local auraName, _, _, _, duration, expirationTime, _, _, _, spellID =
-      C_UnitAuras.UnitAura(unit, i, "HARMFUL|CROWD_CONTROL")
+      C_UnitAuras.UnitAura(unit, auraSlotIndex, "HARMFUL|CROWD_CONTROL")
     if not auraName then break end
     local key = spellID or auraName
     self.seenAuras[key] = true
@@ -90,14 +117,15 @@ function AuraScanner:ScanCC(unit, recordNew, now, targetGUID, targetName)
       if recordNew and sourceName then
         Skada.Data:RecordCC(sourceName, targetName, auraName, spellID, now)
       end
+      self.ccGuidByName[targetName] = targetGUID
     else
       cache[key].expirationTime = expirationTime or cache[key].expirationTime
       cache[key].duration = duration or cache[key].duration
     end
-    i = i + 1
+    auraSlotIndex = auraSlotIndex + 1
   end
 
-  local key, entry
+  local key, entry, removedName
   for key, entry in pairs(cache) do
     if not self.seenAuras[key] then
       local observed = max(0, now - entry.startTime)
@@ -112,7 +140,11 @@ function AuraScanner:ScanCC(unit, recordNew, now, targetGUID, targetName)
         Skada.Data:RecordCCBreak(damage.sourceName, entry.targetName, entry.name, entry.spellID, now)
       end
       cache[key] = nil
+      removedName = entry.targetName
     end
+  end
+  if removedName and next(cache) == nil and self.ccGuidByName[removedName] == targetGUID then
+    self.ccGuidByName[removedName] = nil
   end
 end
 
@@ -134,9 +166,9 @@ function AuraScanner:ScanAuraKind(unit, filter, cacheStore, isBuff, recordNew, n
   wipeTable(self.seenAuraKind)
 
   targetName = targetName or UnitName(unit)
-  local i = 1
+  local auraSlotIndex = 1
   while true do
-    local auraName, _, _, _, duration, expirationTime, _, _, _, spellID = C_UnitAuras.UnitAura(unit, i, filter)
+    local auraName, _, _, _, duration, expirationTime, _, _, _, spellID = C_UnitAuras.UnitAura(unit, auraSlotIndex, filter)
     if not auraName then break end
     local key = spellID or auraName
     self.seenAuraKind[key] = true
@@ -164,7 +196,7 @@ function AuraScanner:ScanAuraKind(unit, filter, cacheStore, isBuff, recordNew, n
       cache[key].expirationTime = expirationTime or cache[key].expirationTime
       cache[key].duration = duration or cache[key].duration
     end
-    i = i + 1
+    auraSlotIndex = auraSlotIndex + 1
   end
 
   local key, entry
@@ -184,14 +216,46 @@ function AuraScanner:ScanAuraKind(unit, filter, cacheStore, isBuff, recordNew, n
   end
 end
 
-function AuraScanner:ScanAll(unit, recordNew, now)
+function AuraScanner:ScanAll(unit, recordNew, now, recordBuffs)
   if not self.auraAPI or not unit or not UnitExists(unit) then return end
+  self.pendingAuraBaselineUnits[unit] = nil
   local targetGUID = UnitGUID(unit)
   if not targetGUID then return end
   local targetName = UnitName(unit)
   self:ScanCC(unit, recordNew, now, targetGUID, targetName)
   self:ScanAuraKind(unit, "HARMFUL", self.debuffsByTarget, false, recordNew, now, targetGUID, targetName)
-  self:ScanAuraKind(unit, "HELPFUL", self.buffsByTarget, true, recordNew, now, targetGUID, targetName)
+  self:ScanAuraKind(unit, "HELPFUL", self.buffsByTarget, true,
+    recordNew and recordBuffs ~= false, now, targetGUID, targetName)
+end
+
+function AuraScanner:DrainDirtyAuras(now, budget)
+  local queue = self.dirtyAuraQueue
+  local dirty = self.dirtyAuraUnits
+  if not (Skada.Data and Skada.Data.active) then
+    while table_getn(queue) > 0 do
+      local unit = table_remove(queue)
+      if dirty[unit] then
+        dirty[unit] = nil
+        self:QueueAuraBaseline(unit)
+      end
+    end
+    return
+  end
+  local scanned = 0
+  while scanned < (budget or 1) and table_getn(queue) > 0 do
+    local unit = table_remove(queue, 1)
+    if dirty[unit] then
+      dirty[unit] = nil
+      if UnitExists(unit) then
+        if self.pendingAuraBaselineUnits[unit] then
+          self:ScanAll(unit, true, now, false)
+        else
+          self:ScanAll(unit, true, now)
+        end
+      end
+      scanned = scanned + 1
+    end
+  end
 end
 
 local function flushAuraCache(store, guid, recordDuration, now)
@@ -209,6 +273,10 @@ end
 function AuraScanner:ClearCCForToken(unit, now)
   local guid = self.guidByToken[unit]
   if not guid then return end
+  local ccCache = self.ccByTarget[guid]
+  local _, entry
+  if ccCache then _, entry = next(ccCache) end
+  local ccTargetName = entry and entry.targetName
   flushAuraCache(self.ccByTarget, guid, function(sourceName, name, spellID, observed)
     Skada.Data:RecordCCDuration(sourceName, name, spellID, observed)
   end, now)
@@ -218,18 +286,33 @@ function AuraScanner:ClearCCForToken(unit, now)
   flushAuraCache(self.buffsByTarget, guid, function(sourceName, name, spellID, observed)
     Skada.Data:RecordBuffDuration(sourceName, name, spellID, observed)
   end, now)
+  if ccTargetName and self.ccGuidByName[ccTargetName] == guid then
+    self.ccGuidByName[ccTargetName] = nil
+  end
   self.guidByToken[unit] = nil
 end
 
 function AuraScanner:OnUnitAura(unit)
   if not unit then return end
-  local now = GetTime()
-  self:ScanAll(unit, true, now)
-  local i
-  for i = table_getn(self.pendingDispels), 1, -1 do
-    local pending = self.pendingDispels[i]
+  local active = Skada.Data and Skada.Data.active
+  local now
+  if active then
+    now = GetTime()
+    if not self.dirtyAuraUnits[unit] then
+      self.dirtyAuraUnits[unit] = true
+      table_insert(self.dirtyAuraQueue, unit)
+    end
+  else
+    self:QueueAuraBaseline(unit)
+  end
+
+  if table_getn(self.pendingDispels) == 0 then return end
+  now = now or GetTime()
+  local dispelIndex
+  for dispelIndex = table_getn(self.pendingDispels), 1, -1 do
+    local pending = self.pendingDispels[dispelIndex]
     if pending.targetUnit == unit and self:ResolveDispelSnapshot(pending, now) then
-      table_remove(self.pendingDispels, i)
+      table_remove(self.pendingDispels, dispelIndex)
     end
   end
 end
@@ -240,7 +323,12 @@ Skada:RegisterEvent("UNIT_AURA", function(eventName, unit)
 end)
 Skada:RegisterEvent("NAME_PLATE_UNIT_ADDED", function(eventName, unit)
   local tracking = Skada.Tracking
-  if tracking then tracking:ScanAll(unit, false, GetTime()) end
+  if not tracking then return end
+  if Skada.Data.active then
+    tracking:ScanAll(unit, false, GetTime())
+  else
+    tracking:QueueAuraBaseline(unit)
+  end
 end)
 Skada:RegisterEvent("NAME_PLATE_UNIT_REMOVED", function(eventName, unit)
   local tracking = Skada.Tracking
@@ -248,9 +336,19 @@ Skada:RegisterEvent("NAME_PLATE_UNIT_REMOVED", function(eventName, unit)
 end)
 Skada:RegisterEvent("PLAYER_TARGET_CHANGED", function()
   local tracking = Skada.Tracking
-  if tracking then tracking:ScanAll("target", false, GetTime()) end
+  if not tracking then return end
+  if Skada.Data.active then
+    tracking:ScanAll("target", false, GetTime())
+  else
+    tracking:QueueAuraBaseline("target")
+  end
 end)
 Skada:RegisterEvent("PLAYER_FOCUS_CHANGED", function()
   local tracking = Skada.Tracking
-  if tracking then tracking:ScanAll("focus", false, GetTime()) end
+  if not tracking then return end
+  if Skada.Data.active then
+    tracking:ScanAll("focus", false, GetTime())
+  else
+    tracking:QueueAuraBaseline("focus")
+  end
 end)

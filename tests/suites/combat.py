@@ -30,6 +30,18 @@ def run(ctx: Context):
       end)
       Skada.Parser:OnCombatMessage("TEST_EVENT", "Target <- Source for 77.")
       assert(captured[1] == "Source" and captured[2] == "Target" and captured[3] == "77")
+      assert(not Skada.Parser.routes.TEST_EVENT[1].directCaptures,
+        "positional combat format was incorrectly marked as direct captures")
+
+      local mixed = {}
+      Skada.Parser:AddPattern({ "TEST_MIXED_EVENT" }, "%2$s <- %s for %3$d.", function(_, a, b, c)
+        mixed[1], mixed[2], mixed[3] = a, b, c
+      end)
+      Skada.Parser:OnCombatMessage("TEST_MIXED_EVENT", "Target <- Source for 77.")
+      assert(mixed[1] == "Source" and mixed[2] == "Target" and mixed[3] == "77",
+        "mixed explicit and automatic combat placeholders were assigned to the wrong slots")
+      assert(not Skada.Parser.routes.TEST_MIXED_EVENT[1].directCaptures,
+        "sparse mixed combat placeholders incorrectly took the direct-capture path")
 
       local originalMatch = Skada.Parser.Match
       local matchCount = 0
@@ -40,6 +52,8 @@ def run(ctx: Context):
       Skada.Parser:AddPattern({ "TEST_CACHED_ROUTE" }, "First %s.", function() end)
       Skada.Parser:AddPattern({ "TEST_CACHED_ROUTE" }, "Second %s.", function() end)
       Skada.Parser:AddPattern({ "TEST_CACHED_ROUTE" }, "Third %s.", function() end)
+      assert(Skada.Parser.routes.TEST_CACHED_ROUTE[3].directCaptures,
+        "natural-order combat format missed the direct capture fast path")
       Skada.Parser:OnCombatMessage("TEST_CACHED_ROUTE", "Third value.")
       assert(matchCount == 3)
       matchCount = 0
@@ -158,9 +172,27 @@ def run(ctx: Context):
         "Fire", false, GetTime()))
       assert(not Skada.Data.current.actors.Derek)
 
+      Skada.Data:AddObservedUnit("target", true)
+      assert(Skada.Data.identitiesByName["Imp (Derek)"] == nil,
+        "an owner becoming interesting did not invalidate cached source misses")
+      assert(Skada.Data:RecordDamage("Imp (Derek)", "Boar", 25, "Firebolt", nil,
+        "Fire", false, GetTime()))
+      assert(Skada.Data.current.actors.Derek.damageSpells["[Imp (Derek)] Firebolt"],
+        "owner-derived source remained unresolved after its owner became interesting")
+
       assert(not Skada.Data:RecordDamage("Erin", "Boar", 30, "Auto Attack", nil,
         "Physical", false, GetTime()))
       assert(not Skada.Data.current.actors.Erin)
+      local ignoredIdentity = Skada.Data.identitiesByName.Erin
+      assert(ignoredIdentity == false,
+        "ignored combat sources should retain an allocation-free negative identity cache")
+      assert(not Skada.Data:RecordDamage("Erin", "Boar", 30, "Auto Attack", nil,
+        "Physical", false, GetTime()))
+      assert(Skada.Data.identitiesByName.Erin == false,
+        "ignored combat source identity was rebuilt on a repeated event")
+
+      assert(Skada.Common.Trim("Alice") == "Alice")
+      assert(Skada.Common.Trim(string.char(9) .. " Alice " .. string.char(13) .. string.char(10)) == "Alice")
 
       GetNumPartyMembers = groupedCount
       TestSetTarget("Boar", "0xC")
@@ -171,4 +203,18 @@ def run(ctx: Context):
       Skada.Data:RecordDamage("Wolf (Alice)", "Boar", 15, "Bite", nil, "Physical", false, GetTime())
       local pet = Skada.Data.current.actors["Alice"]
       assert(pet and pet.damageSpells["[Wolf (Alice)] Bite"], "pet damage not merged to owner")
+    ''')
+
+    ctx.run('''
+      -- RebuildRoster wipes groupTokens and refills it: under the client's
+      -- Lua 5.0 size cache, a refill that bypasses table.insert pins
+      -- table.getn at 0 and collapses the roster to one rewritten token.
+      Skada.Data:RebuildRoster()
+      Skada.Data:RebuildRoster()
+      assert(table.getn(Skada.Data.groupTokens) == 3,
+        "roster refill did not maintain the client's cached array length: " ..
+        tostring(table.getn(Skada.Data.groupTokens)))
+      assert(Skada.Data.groupTokens[1] == "player" and
+        Skada.Data.groupTokens[2] == "pet" and
+        Skada.Data.groupTokens[3] == "party1", "roster refill lost group tokens")
     ''')

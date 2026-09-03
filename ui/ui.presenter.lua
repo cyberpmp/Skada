@@ -5,11 +5,13 @@ Skada.UIPresenter = Presenter
 
 local Common = Skada.Common
 local getVisibleRowCount = Skada.WindowConfig.GetVisibleRowCount
+local wipeTable = Common.Wipe
 
 local pairs = pairs
 local floor = math.floor
 local max = math.max
 local table_getn = table.getn
+local table_insert = table.insert
 local table_sort = table.sort
 
 local function sortEntries(left, right)
@@ -54,14 +56,26 @@ function Presenter:GetEntry(index)
 end
 
 function Presenter:ClearDisplay()
-  local i
-  for i = 1, table_getn(self.display) do self.display[i] = nil end
+  local entryIndex, entry
+  for entryIndex = 1, table_getn(self.display) do
+    entry = self.display[entryIndex]
+    if entry then clearEntry(entry) end
+  end
+  wipeTable(self.display)
+  local rows = self.rows
+  if rows then
+    local rowIndex, row
+    for rowIndex = 1, table_getn(rows) do
+      row = rows[rowIndex]
+      if row then row.entry = nil end
+    end
+  end
 end
 
 function Presenter:FormatThreatText(threatRow)
   return (threatRow.estimated and "~" or "") .. Skada:FormatNumber(threatRow.threat) .. " (" ..
-    tostring(floor((threatRow.percent or 0) + 0.5)) .. "%) | " ..
-    Skada:FormatNumber(threatRow.tps or 0) .. " TPS"
+    Skada:FormatNumber(threatRow.tps or 0) .. " TPS, " ..
+    tostring(floor((threatRow.percent or 0) + 0.5)) .. "%)"
 end
 
 function Presenter:BuildThreatDisplay()
@@ -71,11 +85,11 @@ function Presenter:BuildThreatDisplay()
   local visible = self.db and getVisibleRowCount(self.db) or rowCount
   if visible > rowCount then visible = rowCount end
 
-  local playerName = UnitName and UnitName("player") or nil
-  local playerIndex, i
+  local playerName = Skada.Data and Skada.Data:GetPlayerName()
+  local playerIndex, rowIndex
   if playerName then
-    for i = 1, rowCount do
-      if rows[i].name == playerName then playerIndex = i break end
+    for rowIndex = 1, rowCount do
+      if rows[rowIndex].name == playerName then playerIndex = rowIndex break end
     end
   end
 
@@ -91,7 +105,7 @@ function Presenter:BuildThreatDisplay()
     entry.text = Presenter:FormatThreatText(threatRow)
     entry.class = threatRow.class
     entry.threatRow = threatRow
-    self.display[displayIndex] = entry
+    table_insert(self.display, entry)
   end
   return visible
 end
@@ -115,14 +129,14 @@ function Presenter:BuildModeDisplay(set, mode)
           entry.class = detailActor.class
           entry.actor = detailActor
           entry.spell = spell
-          self.display[count] = entry
+          table_insert(self.display, entry)
         end
       end
     end
   else
-    local i, actor, value, entry
-    for i = 1, table_getn(set.actorList) do
-      actor = set.actorList[i]
+    local actorIndex, actor, value, entry
+    for actorIndex = 1, table_getn(set.actorList) do
+      actor = set.actorList[actorIndex]
       value = Skada.Modes:GetActorValue(mode, actor)
       if value > 0 then
         count = count + 1
@@ -131,7 +145,7 @@ function Presenter:BuildModeDisplay(set, mode)
         entry.value = value
         entry.class = actor.class
         entry.actor = actor
-        self.display[count] = entry
+        table_insert(self.display, entry)
       end
     end
   end
@@ -142,21 +156,22 @@ end
 
 function Presenter:BuildModesDisplay(set)
   local count = 0
-  local i, mode, entry
-  for i = 1, table_getn(Skada.Modes.list) do
-    mode = Skada.Modes.list[i]
+  local setDuration = Skada.Data:GetSetDuration(set)
+  local modeIndex, mode, entry
+  for modeIndex = 1, table_getn(Skada.Modes.list) do
+    mode = Skada.Modes.list[modeIndex]
     count = count + 1
     entry = self:GetEntry(count)
     entry.label = mode.title
     if mode.live then
       entry.text = Skada.Threat and Skada.Threat:GetSummaryText() or "Unavailable"
     else
-      entry.text = Skada.Modes:GetSetTitle(mode, set)
+      entry.text = Skada.Modes:GetSetTitle(mode, set, setDuration)
     end
     entry.value = 1
     entry.modeKey = mode.key
     entry.r, entry.g, entry.b = 0.45, 0.48, 0.98
-    self.display[count] = entry
+    table_insert(self.display, entry)
   end
   return count
 end
@@ -165,13 +180,21 @@ function Presenter:FormatDuration(seconds)
   return Common.FormatDuration(seconds)
 end
 
+function Presenter:GetPaintSetDuration()
+  if self.paintSetDuration == nil then
+    self.paintSetDuration = Skada.Data:GetSetDuration(self.paintSet)
+  end
+  return self.paintSetDuration
+end
+
 function Presenter:BuildSegmentsDisplay()
   local choices = Skada.Data:GetSegmentChoices(self.segmentChoices)
   local count = table_getn(choices)
-  local i, choice, entry, name
-  for i = 1, count do
-    choice = choices[i]
-    entry = self:GetEntry(i)
+  local now = Skada.Data.active and GetTime() or nil
+  local choiceIndex, choice, entry, name
+  for choiceIndex = 1, count do
+    choice = choices[choiceIndex]
+    entry = self:GetEntry(choiceIndex)
     name = choice.label
     if choice.value == "current" then
       name = "Current"
@@ -181,13 +204,13 @@ function Presenter:BuildSegmentsDisplay()
       name = tostring(choice.value) .. ". " .. name
     end
     entry.label = name
-    entry.text = self:FormatDuration(Skada.Data:GetSetDuration(choice.set))
+    entry.text = self:FormatDuration(Skada.Data:GetSetDuration(choice.set, now))
     entry.value = 1
     entry.segment = choice.value
     entry.set = choice.set
     entry.hideRank = true
     entry.r, entry.g, entry.b = 0.82, 0.66, 0.30
-    self.display[i] = entry
+    table_insert(self.display, entry)
   end
   return count
 end
@@ -205,15 +228,20 @@ function Presenter:GetEntryText(entry)
     return Presenter:FormatThreatText(entry.threatRow)
   end
   if entry.spell then
-    return Skada.Modes:GetDetailText(self.paintMode, entry.spell, entry.actor, self.paintSet)
+    local duration = self.paintMode.uptime and Presenter.GetPaintSetDuration(self) or nil
+    return Skada.Modes:GetDetailText(self.paintMode, entry.spell, entry.actor, self.paintSet, duration)
   end
   if entry.actor then
-    return Skada.Modes:GetActorText(self.paintMode, entry.actor, self.paintSet)
+    local duration = self.paintMode.uptime and Presenter.GetPaintSetDuration(self) or nil
+    return Skada.Modes:GetActorText(self.paintMode, entry.actor, self.paintSet, duration)
   end
   return entry.text
 end
 
 function Presenter:GetTitle(mode)
+  if self.db and self.db.nameIsCustom and self.db.name and self.db.name ~= "" then
+    return self.db.name
+  end
   if self.view == "modes" then return "Skada: Modes" end
   if self.view == "segments" then return "Skada: Fights" end
   if mode.live then return Skada.Threat and Skada.Threat:GetTitle() or "Threat: Unavailable" end

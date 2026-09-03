@@ -18,9 +18,24 @@ function DamageWitness:GetLastDamageInfo(targetName)
 end
 
 function DamageWitness:NoteDamage(sourceName, targetName, spellName, now)
-  local unit = Skada.Data:FindUnitByName(targetName)
-  local guid = unit and UnitGUID(unit)
-  if not guid then return end
+  if not targetName then return end
+  now = now or GetTime()
+  local missedAt = self.unitMissByName[targetName]
+  local guid
+  if missedAt and now - missedAt < 0.5 then
+    guid = self.ccGuidByName[targetName]
+    if not guid then return end
+  else
+    local unit = Skada.Data:FindUnitByName(targetName)
+    guid = unit and UnitGUID(unit)
+  end
+  if not guid then
+    if not missedAt or now - missedAt >= 0.5 then
+      self.unitMissByName[targetName] = now
+    end
+    return
+  end
+  self.unitMissByName[targetName] = nil
   local entry = self.lastDamageByTarget[guid]
   if not entry then
     entry = {}

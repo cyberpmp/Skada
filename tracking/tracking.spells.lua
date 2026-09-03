@@ -56,9 +56,9 @@ function SpellRegistry:IsInterruptSpell(spellID, spellName)
     if not result and C_Spell.GetSpellEffectMechanics then
       local effects = C_Spell.GetSpellEffectMechanics(spellID)
       if effects then
-        local i
-        for i = 1, 3 do
-          if effects[i] == 26 then result = true break end
+        local effectIndex
+        for effectIndex = 1, 3 do
+          if effects[effectIndex] == 26 then result = true break end
         end
       end
     end

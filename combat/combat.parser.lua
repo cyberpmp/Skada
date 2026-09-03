@@ -6,6 +6,7 @@ Skada.Parser = Parser
 local type = type
 local tonumber = tonumber
 local table_getn = table.getn
+local table_insert = table.insert
 local string_sub = string.sub
 local string_find = string.find
 local string_len = string.len
@@ -23,49 +24,56 @@ local function compileCombatFormat(format)
   local sampleMessage = ""
   local capturePositions = {}
   local captureCount = 0
-  local automaticIndex = 0
+  local automaticIndex = 1
   local length = string_len(format)
-  local i = 1
+  local cursor = 1
 
-  while i <= length do
-    local char = string_sub(format, i, i)
+  while cursor <= length do
+    local char = string_sub(format, cursor, cursor)
     if char ~= "%" then
       if PATTERN_MAGIC_CHARACTERS[char] then outputPattern = outputPattern .. "%" end
       outputPattern = outputPattern .. char
       sampleMessage = sampleMessage .. char
-      i = i + 1
+      cursor = cursor + 1
     else
-      local nextChar = string_sub(format, i + 1, i + 1)
+      local nextChar = string_sub(format, cursor + 1, cursor + 1)
       if nextChar == "%" then
         outputPattern = outputPattern .. "%%"
         sampleMessage = sampleMessage .. "%"
-        i = i + 2
+        cursor = cursor + 2
       else
-        local j = i + 1
+        local specCursor = cursor + 1
         local digits = ""
-        while j <= length do
-          local digit = string_sub(format, j, j)
+        while specCursor <= length do
+          local digit = string_sub(format, specCursor, specCursor)
           if not string_find(digit, "%d") then break end
           digits = digits .. digit
-          j = j + 1
+          specCursor = specCursor + 1
         end
 
         local explicitIndex
-        if digits ~= "" and string_sub(format, j, j) == "$" then
+        if digits ~= "" and string_sub(format, specCursor, specCursor) == "$" then
           explicitIndex = tonumber(digits)
-          j = j + 1
+          specCursor = specCursor + 1
         else
-          j = i + 1
+          specCursor = cursor + 1
         end
 
-        while j <= length do
-          local flag = string_sub(format, j, j)
-          if string_find(flag, "[%d%.%-%+%s]") then j = j + 1 else break end
+        while specCursor <= length do
+          local flag = string_sub(format, specCursor, specCursor)
+          if string_find(flag, "[%d%.%-%+%s]") then specCursor = specCursor + 1 else break end
         end
-        local specifier = string_sub(format, j, j)
+        local specifier = string_sub(format, specCursor, specCursor)
         captureCount = captureCount + 1
-        automaticIndex = automaticIndex + 1
-        capturePositions[explicitIndex or automaticIndex] = captureCount
+        if explicitIndex then
+          capturePositions[explicitIndex] = captureCount
+        else
+          while capturePositions[automaticIndex] do
+            automaticIndex = automaticIndex + 1
+          end
+          capturePositions[automaticIndex] = captureCount
+          automaticIndex = automaticIndex + 1
+        end
 
         if specifier == "d" or specifier == "i" then
           outputPattern = outputPattern .. "([%-]?%d+)"
@@ -80,12 +88,12 @@ local function compileCombatFormat(format)
           outputPattern = outputPattern .. "(.-)"
           sampleMessage = sampleMessage .. "sample"
         end
-        i = j + 1
+        cursor = specCursor + 1
       end
     end
   end
 
-  return outputPattern .. "$", capturePositions, sampleMessage
+  return outputPattern .. "$", capturePositions, sampleMessage, captureCount
 end
 
 local function captureAt(index, first, second, third, fourth, fifth)
@@ -98,14 +106,23 @@ end
 
 function Parser:AddPattern(events, format, handler, critical, key)
   if type(format) ~= "string" or format == "" then return end
-  local pattern, positions, sampleMessage = compileCombatFormat(format)
+  local pattern, positions, sampleMessage, captureCount = compileCombatFormat(format)
+  local directCaptures = true
+  local positionIndex
+  for positionIndex = 1, captureCount do
+    if positions[positionIndex] ~= positionIndex then
+      directCaptures = false
+      break
+    end
+  end
   local entry = {
     pattern = pattern,
-    positions = positions,
+    positions = not directCaptures and positions or nil,
     sampleMessage = sampleMessage,
     handler = handler,
     critical = critical and true or false,
     key = key or format,
+    directCaptures = directCaptures,
   }
 
   local eventIndex, eventName, route
@@ -123,11 +140,11 @@ function Parser:AddPattern(events, format, handler, critical, key)
     for previousIndex = 1, table_getn(route) do
       previousEntry = route[previousIndex]
       if string_find(previousEntry.sampleMessage, entry.pattern) then
-        priorityEntries[table_getn(priorityEntries) + 1] = previousEntry
+        table_insert(priorityEntries, previousEntry)
       end
     end
     route.priorityEntriesByEntry[entry] = priorityEntries
-    route[table_getn(route) + 1] = entry
+    table_insert(route, entry)
   end
 end
 
@@ -138,6 +155,7 @@ end
 function Parser:Match(entry, message)
   local start, _, first, second, third, fourth, fifth = string_find(message, entry.pattern)
   if not start then return false end
+  if entry.directCaptures then return true, first, second, third, fourth, fifth end
   local positions = entry.positions
   return true,
     captureAt(positions[1], first, second, third, fourth, fifth),

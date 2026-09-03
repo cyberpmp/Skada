@@ -1,8 +1,3 @@
--- Addon chunks on the OctoWoW client receive no varargs and no _G global
--- (ClassicAPI's Compat.lua bootstraps _G from getfenv(0) for the same
--- reason). The chunk environment is the shared global environment, so
--- resolve it directly and store the namespace there. First file in Skada.toc
--- and owns namespace creation.
 local env = _G or getfenv(0)
 local Skada = env.Skada
 if not Skada then
@@ -15,6 +10,8 @@ Skada.Common = Common
 
 local pairs = pairs
 local type = type
+local string_byte = string.byte
+local string_gsub = string.gsub
 
 string.gmatch = string.gmatch or string.gfind
 string.gfind = string.gfind or string.gmatch
@@ -23,36 +20,36 @@ if not string.match then
 
   local string_find = string.find
   local string_sub = string.sub
-  function string.match(s, pattern, init)
-    local start, stop, c1, c2, c3, c4, c5 = string_find(s, pattern, init)
+  function string.match(text, pattern, init)
+    local start, stop, first, second, third, fourth, fifth = string_find(text, pattern, init)
     if not start then return nil end
-    if c1 == nil then return string_sub(s, start, stop) end
-    return c1, c2, c3, c4, c5
+    if first == nil then return string_sub(text, start, stop) end
+    return first, second, third, fourth, fifth
   end
 end
 
 local string_match = string.match
 Common.Match = string_match
 
-function Common.Wipe(tbl)
+function Common.Wipe(targetTable)
   if table.wipe then
-    table.wipe(tbl)
+    table.wipe(targetTable)
   else
     local key
-    for key in pairs(tbl) do tbl[key] = nil end
+    for key in pairs(targetTable) do targetTable[key] = nil end
   end
-  -- Lua 5.0 (the client runtime): table.insert/table.remove maintain an
-  -- out-of-band size that table.getn trusts, and wiping the keys does not
-  -- reset it -- a wiped list would keep reporting its previous length. The
-  -- addon mixes wipes with getn-based iteration, so clear the size too.
-  if table.setn then table.setn(tbl, 0) end
+  if table.setn then table.setn(targetTable, 0) end
 end
 
 function Common.Trim(value)
   if type(value) ~= "string" then return value end
 
-  if not string.find(value, "^%s") and not string.find(value, "%s$") then return value end
-  return string.gsub(value, "^%s*(.-)%s*$", "%1")
+  local first = string_byte(value, 1)
+  local last = string_byte(value, -1)
+  local firstIsSpace = first == 32 or (first and first >= 9 and first <= 13)
+  local lastIsSpace = last == 32 or (last and last >= 9 and last <= 13)
+  if not firstIsSpace and not lastIsSpace then return value end
+  return string_gsub(value, "^%s*(.-)%s*$", "%1")
 end
 
 function Common.GetClickButton(positional)

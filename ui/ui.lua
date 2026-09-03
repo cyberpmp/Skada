@@ -44,9 +44,6 @@ UI.CreateRow = Renderer.CreateRow
 UI.EnsureRows = Renderer.EnsureRows
 UI.ApplyLayout = Renderer.ApplyLayout
 
--- Every drag surface (title bar, window background, meter bar) shares one
--- move/snap/persist sequence; flagName names the
--- per-surface "this was a drag, swallow the click" marker its OnClick reads.
 function UI:BeginWindowDrag(flagName)
   if self.db.locked then return end
   self.manager:SetActive(self)
@@ -74,23 +71,30 @@ UI.BuildReportLines = Report.BuildReportLines
 UI.Report = Report.Report
 UI.ShowReportPopup = Report.ShowReportPopup
 
-function UI:NeedsContinuousRefresh()
+function UI:NeedsContinuousRefresh(now)
   local windows = self.windows
-  local i, window
-  for i = 1, table_getn(windows) do
-    window = windows[i]
-    if window.db.visible then
-      if window.db.mode == "threat" then
-
-        if Skada.Threat and Skada.Threat.NeedsUpdates and Skada.Threat:NeedsUpdates() then
-          return true
+  local data = Skada.Data
+  local dataActive = data and data.active
+  local wantsThreat = false
+  local windowIndex, window, set, mode
+  for windowIndex = 1, table_getn(windows) do
+    window = windows[windowIndex]
+    if not window.broken and window.db.visible then
+      if window.view == "mode" and window.db.mode == "threat" then
+        wantsThreat = true
+      elseif dataActive then
+        if window.view == "segments" then return true end
+        set = data:GetSelectedSet(window.db.segment)
+        if set == data.current or set == data.total then
+          if window.view == "modes" then return true end
+          mode = Skada.Modes:Get(window.db.mode)
+          if mode.uptime then return true end
         end
-      elseif Skada.Data and Skada.Data.active then
-        return true
       end
     end
   end
-  return false
+  return wantsThreat and Skada.Threat and Skada.Threat.NeedsUpdates
+    and Skada.Threat:NeedsUpdates(now, true) or false
 end
 
 function UI:SetView(view)
@@ -132,7 +136,6 @@ end
 function UI:SelectEntry(entry)
   if not entry then return end
   if entry.modeKey then
-    -- through Modes:Set so auto-named windows follow the mode's title
     Skada.Modes:Set(entry.modeKey, self)
     self.manager:SyncLegacy(self)
     self:SetView("mode")
@@ -168,29 +171,40 @@ function UI:Scroll(direction)
 end
 
 function UI:Refresh()
-  if not self.frame then return end
+  if not self.frame or self.broken then
+    self.hasAnimatingRows = false
+    return
+  end
   if self.layoutDirty then
     self:ApplyLayout()
     self.layoutDirty = false
   end
-  if not self.db.visible then return end
+  if not self.db.visible then
+    self.hasAnimatingRows = false
+    return
+  end
 
   local set = Skada.Data:GetSelectedSet(self.db.segment)
   local mode = Skada.Modes:Get(self.db.mode)
-  local count = self:BuildDisplay(set, mode)
-  self.displayCount = count
-
   self.paintSet = set
   self.paintMode = mode
   self.paintLive = mode.live
+  self.paintSetDuration = nil
+  local count = self:BuildDisplay(set, mode)
+  self.displayCount = count
+
   local maximum = count > 0 and self.display[1].value or 1
   if mode.live and Skada.Threat and Skada.Threat.rows and Skada.Threat.rows[1] then
     maximum = Skada.Threat.rows[1].threat or maximum
   end
   if self.view ~= "mode" then maximum = 1 end
+  if not maximum or maximum <= 0 then maximum = 1 end
   self.paintMaximum = maximum
   self.currentTitle = self:GetTitle(mode)
-  self.title:SetText(self.currentTitle)
+  if self.lastTitle ~= self.currentTitle then
+    self.lastTitle = self.currentTitle
+    self.title:SetText(self.currentTitle)
+  end
   if self.actionMenu and self.actionMenu:IsShown() then self.actionMenu:Refresh() end
 
   self:PaintRows()
@@ -200,8 +214,6 @@ function UI:InitializeWindow(config)
   local owner = self
   self.db = config
 
-  -- A Button retains all normal Frame behavior while also receiving clicks
-  -- on exposed window background (including a meter with no visible rows).
   local frame = CreateFrame("Button", "SkadaBarWindow" .. tostring(config.id), UIParent)
   self.frame = frame
   frame:SetFrameStrata("LOW")
@@ -332,11 +344,11 @@ function UI:InitializeWindow(config)
 
   local headerButtons = { menuButton, autoButton, modeButton }
   self.headerButtons = headerButtons
-  local i
-  for i = 1, table_getn(headerButtons) do headerButtons[i]:SetAlpha(Style.HEADER_BUTTON_ALPHA) end
+  local buttonIndex
+  for buttonIndex = 1, table_getn(headerButtons) do headerButtons[buttonIndex]:SetAlpha(Style.HEADER_BUTTON_ALPHA) end
   header:SetScript("OnEnter", function(self)
-    local i
-    for i = 1, table_getn(headerButtons) do headerButtons[i]:SetAlpha(1) end
+    local buttonIndex
+    for buttonIndex = 1, table_getn(headerButtons) do headerButtons[buttonIndex]:SetAlpha(1) end
     GameTooltip:SetOwner(self, "ANCHOR_TOP")
     GameTooltip:AddLine(owner.currentTitle or config.name or "Skada", 1, 0.5, 0)
     GameTooltip:AddLine("Left-click forward, right-click back, or drag to move.", 0.8, 0.8, 0.8)
@@ -344,8 +356,8 @@ function UI:InitializeWindow(config)
     GameTooltip:Show()
   end)
   header:SetScript("OnLeave", function()
-    local i
-    for i = 1, table_getn(headerButtons) do headerButtons[i]:SetAlpha(Style.HEADER_BUTTON_ALPHA) end
+    local buttonIndex
+    for buttonIndex = 1, table_getn(headerButtons) do headerButtons[buttonIndex]:SetAlpha(Style.HEADER_BUTTON_ALPHA) end
     GameTooltip:Hide()
   end)
 
@@ -398,44 +410,41 @@ function UI:GetWindow(value)
   local numeric = tonumber(value)
   if numeric and self.byID[numeric] then return self.byID[numeric] end
   local lowered = string.lower(tostring(value))
-  local i, window
-  for i = 1, table_getn(self.windows) do
-    window = self.windows[i]
+  local windowIndex, window
+  for windowIndex = 1, table_getn(self.windows) do
+    window = self.windows[windowIndex]
     if string.lower(window.db.name or "") == lowered then return window end
   end
 end
 
--- Logical activity chooses the target for commands and window actions.
--- Settings passes showSelection=true to additionally draw editing chrome;
--- ordinary meter interaction leaves that settings-only state untouched.
 function UI:SetActive(window, showSelection)
-  if not window then return end
+  if not window or window.broken then return end
   self.activeWindow = window
   if showSelection ~= nil then
     self.visualActive = showSelection and window or nil
   end
   Skada.db.profile.selectedWindowID = window.db.id
-  local i, candidate
-  for i = 1, table_getn(self.windows) do
-    candidate = self.windows[i]
-    if candidate ~= window and candidate.actionMenu then candidate.actionMenu:Hide() end
-    Style:ApplyMeterWindow(candidate.frame, candidate == self.visualActive, Style:GetWindowOpacity(candidate.db))
-    Style:ApplyHeader(candidate)
+  local windowIndex, candidate
+  for windowIndex = 1, table_getn(self.windows) do
+    candidate = self.windows[windowIndex]
+    if not candidate.broken then
+      if candidate ~= window and candidate.actionMenu then candidate.actionMenu:Hide() end
+      Style:ApplyMeterWindow(candidate.frame, candidate == self.visualActive, Style:GetWindowOpacity(candidate.db))
+      Style:ApplyHeader(candidate)
+    end
   end
 end
 
--- Drops the "selected" border highlight when the settings window closes so
--- no meter is left looking picked. The logical target follows the visual:
--- with nothing highlighted, GetActive falls back to the primary window
--- instead of silently acting on the last-edited meter.
 function UI:ClearSelectionVisual()
   self.visualActive = nil
   self.activeWindow = nil
-  local i, candidate
-  for i = 1, table_getn(self.windows) do
-    candidate = self.windows[i]
-    Style:ApplyMeterWindow(candidate.frame, false, Style:GetWindowOpacity(candidate.db))
-    Style:ApplyHeader(candidate)
+  local windowIndex, candidate
+  for windowIndex = 1, table_getn(self.windows) do
+    candidate = self.windows[windowIndex]
+    if not candidate.broken then
+      Style:ApplyMeterWindow(candidate.frame, false, Style:GetWindowOpacity(candidate.db))
+      Style:ApplyHeader(candidate)
+    end
   end
 end
 
@@ -451,18 +460,11 @@ function UI:CreateWindow(config)
     displayCount = 0,
   }, windowMeta)
   applyWindowDefaults(config, Skada.db.profile)
-  -- Register before building: a client-only failure part way through
-  -- InitializeWindow must leave an editable (if rough) settings entry rather
-  -- than a visible frame the settings panel cannot see. The failure is
-  -- reported so the broken build is diagnosable from chat.
-  -- table.insert, not a getn-based append: the client's Lua 5.0 table.getn
-  -- trusts the size cache that table.remove maintains, and a manual append
-  -- after a delete made every later window invisible to getn-based loops
-  -- (the settings tree among them) while it kept rendering on screen.
   table.insert(self.windows, window)
   self.byID[config.id] = window
   local ok, message = pcall(window.InitializeWindow, window, config)
   if not ok then
+    window.broken = true
     Skada:Print("Window " .. tostring(config.id) .. " failed to build: " .. tostring(message))
   end
   return window
@@ -471,20 +473,17 @@ end
 function UI:CreateNew(name)
   local source = self:GetActive() or self:GetPrimary()
   local profile = Skada.db.profile
-  local id = profile.nextWindowID or 2
-  profile.nextWindowID = id + 1
-  local config = { id = id }
+  local windowId = profile.nextWindowID or 2
+  profile.nextWindowID = windowId + 1
+  local config = { id = windowId }
   applyWindowDefaults(config, source and source.db or profile)
   config.name = name and name ~= "" and name or Skada.Modes:Get(config.mode).title
-  -- a name supplied here is the user's own; an inherited name never is, or
-  -- the new window would never follow its mode's title
   config.nameIsCustom = name ~= nil and name ~= ""
   config.visible = true
   config.x = (source and source.db.x or 0) + 28
   config.y = (source and source.db.y or 0) - 28
   config.segment = Skada.Data.clientInCombat and "current" or "total"
   if Skada.Modes:Get(config.mode).live then config.segment = "current" end
-  -- see CreateWindow: a manual append desyncs from table.remove's size cache
   table.insert(profile.windows, config)
   local window = self:CreateWindow(config)
   self:SetActive(window)
@@ -499,17 +498,18 @@ function UI:DeleteWindow(window)
     Skada:Print("At least one Skada window must remain.")
     return false
   end
-  local i
   local replaceVisualSelection = self.visualActive == window
   if window.actionMenu then window.actionMenu:Hide() end
   window.frame:Hide()
   self.byID[window.db.id] = nil
-  for i = table_getn(self.windows), 1, -1 do
-    if self.windows[i] == window then table.remove(self.windows, i) break end
+  local windowIndex
+  for windowIndex = table_getn(self.windows), 1, -1 do
+    if self.windows[windowIndex] == window then table.remove(self.windows, windowIndex) break end
   end
-  for i = table_getn(Skada.db.profile.windows), 1, -1 do
-    if Skada.db.profile.windows[i] == window.db then
-      table.remove(Skada.db.profile.windows, i)
+  local configIndex
+  for configIndex = table_getn(Skada.db.profile.windows), 1, -1 do
+    if Skada.db.profile.windows[configIndex] == window.db then
+      table.remove(Skada.db.profile.windows, configIndex)
       break
     end
   end
@@ -534,23 +534,25 @@ function UI:RequestDelete(window)
 end
 
 function UI:RefreshAll()
-  local i, window
-  for i = 1, table_getn(self.windows) do
-    window = self.windows[i]
+  local windowIndex, window
+  local hasAnimations = false
+  for windowIndex = 1, table_getn(self.windows) do
+    window = self.windows[windowIndex]
     window:Refresh()
-    Style:SetButtonActive(window.autoButton, window.db.autoSwitch, 0.20, 1, 0.20)
-    if not window.db.visible and window.actionMenu then window.actionMenu:Hide() end
+    if window.hasAnimatingRows then hasAnimations = true end
+    if not window.broken then
+      Style:SetButtonActive(window.autoButton, window.db.autoSwitch, 0.20, 1, 0.20)
+      if not window.db.visible and window.actionMenu then window.actionMenu:Hide() end
+    end
   end
 
-  self.animateUntil = GetTime() + 0.6
+  self.hasActiveAnimations = hasAnimations
 end
 
 function UI:ApplyCombatState(inCombat)
   local combatMode = self.db.combatMode
   local renamed = false
   if inCombat and combatMode and combatMode ~= "" and combatMode ~= self.db.mode then
-    -- keep the pre-combat mode; a later call must not overwrite it with the
-    -- already-switched mode
     if self.db.returnAfterCombat and not self.restoreMode then
       self.restoreMode = self.db.mode
     end
@@ -561,7 +563,6 @@ function UI:ApplyCombatState(inCombat)
     renamed = modeRenamed
     self.restoreMode = nil
   end
-  -- unchecking "return after combat" mid-fight must drop the pending restore
   if inCombat and not self.db.returnAfterCombat then self.restoreMode = nil end
   if Skada.Modes:Get(self.db.mode).live then self.db.segment = "current" end
   if not self.db.autoSwitch then return renamed end
@@ -576,10 +577,10 @@ function UI:ApplyCombatState(inCombat)
 end
 
 function UI:OnCombatState(inCombat)
-  local i, renamed
+  local windowIndex, renamed
   renamed = false
-  for i = 1, table_getn(self.windows) do
-    if self.windows[i]:ApplyCombatState(inCombat) then renamed = true end
+  for windowIndex = 1, table_getn(self.windows) do
+    if self.windows[windowIndex]:ApplyCombatState(inCombat) then renamed = true end
   end
   Skada:MarkDirty()
   if renamed and Skada.Options and Skada.Options.frame and Skada.OptionsShell then
@@ -588,9 +589,9 @@ function UI:OnCombatState(inCombat)
 end
 
 function UI:ResetViews(resetSegments)
-  local i, window
-  for i = 1, table_getn(self.windows) do
-    window = self.windows[i]
+  local windowIndex, window
+  for windowIndex = 1, table_getn(self.windows) do
+    window = self.windows[windowIndex]
     window.detailActor = nil
     window.view = "mode"
     window.scrollOffset = 0
@@ -606,8 +607,8 @@ function UI:ResetViews(resetSegments)
 end
 
 function UI:MarkLayouts()
-  local i
-  for i = 1, table_getn(self.windows) do self.windows[i].layoutDirty = true end
+  local windowIndex
+  for windowIndex = 1, table_getn(self.windows) do self.windows[windowIndex].layoutDirty = true end
 end
 
 function UI:Initialize()
@@ -641,11 +642,11 @@ function UI:Initialize()
     profile.windows[1] = first
   end
 
-  local i, config, highest, window
+  local windowIndex, config, highest, window
   highest = 0
-  for i = 1, table_getn(profile.windows) do
-    config = profile.windows[i]
-    config.id = config.id or i
+  for windowIndex = 1, table_getn(profile.windows) do
+    config = profile.windows[windowIndex]
+    config.id = config.id or windowIndex
     config.name = config.name or (config.id == 1 and "Skada" or ("Skada " .. config.id))
     applyWindowDefaults(config, profile)
     window = self:CreateWindow(config)
@@ -653,8 +654,6 @@ function UI:Initialize()
     if config.id == profile.selectedWindowID then self.activeWindow = window end
   end
   profile.nextWindowID = max(profile.nextWindowID or 1, highest + 1)
-  -- Restore the logical target without making the meter look selected for
-  -- editing. Visual selection belongs exclusively to the settings window.
   self:SetActive(self.activeWindow or self:GetPrimary())
   self:OnCombatState(Skada.Data.clientInCombat)
   self:RefreshAll()
@@ -676,17 +675,16 @@ Skada:RegisterInitializer(function() UI:Initialize() end, "bar windows")
 
 local RenderPolicy = {}
 
-function RenderPolicy:ShouldRebuild()
-  return Skada.dirty or (UI.NeedsContinuousRefresh and Skada.UI:NeedsContinuousRefresh())
+function RenderPolicy:ShouldRebuild(now)
+  return Skada.dirty or (UI.NeedsContinuousRefresh and Skada.UI:NeedsContinuousRefresh(now))
 end
 
 function RenderPolicy:Rebuild()
   Skada.UI:RefreshAll()
 end
 
-function RenderPolicy:ShouldAnimate(now)
-  return Skada.UI:NeedsContinuousRefresh()
-    or (Skada.UI.animateUntil and now < Skada.UI.animateUntil)
+function RenderPolicy:ShouldAnimate()
+  return Skada.UI.hasActiveAnimations and true or false
 end
 
 function RenderPolicy:Animate()

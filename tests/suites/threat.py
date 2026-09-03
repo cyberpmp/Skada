@@ -26,10 +26,19 @@ def run(ctx: Context):
       assert(primary.title.textValue == "Threat: Boar")
       assert(primary.displayCount == 2)
       assert(primary.display[1].label == "Bob" and primary.display[1].value == 1842)
-      assert(primary.display[1].text == "1842 (100%) | 0 TPS")
+      assert(primary.display[1].text == "1842 (0 TPS, 100%)")
       assert(primary.display[1].threatRow.tank and primary.display[1].threatRow.melee)
       assert(primary.display[2].label == "Alice" and primary.display[2].value == 1234)
       assert(Skada.Data.current.threat == nil and Skada.Data.total.threat == nil)
+      local liveRows = Skada.Threat.rows
+      Skada.Threat.rows = {
+        { name = "Zero", threat = 0, tps = 0, percent = 0, class = "OTHER" },
+      }
+      primary:Refresh()
+      local zeroMaximum = primary.paintMaximum
+      Skada.Threat.rows = liveRows
+      primary:Refresh()
+      assert(zeroMaximum == 1, "an all-zero live meter retained a zero paint maximum")
       local savedShowClassIcons = Skada.db.profile.showClassIcons
       Skada.db.profile.showClassIcons = true
       primary:Refresh()
@@ -48,9 +57,10 @@ def run(ctx: Context):
 
       local savedPartyCount = GetNumPartyMembers
       GetNumPartyMembers = function() return 0 end
+      TestAddonPrefix, TestAddonMessage, TestAddonChannel = nil, nil, nil
       Skada.Threat.nextQuery = 0
       Skada.Threat:Update(GetTime())
-      assert(TestAddonChannel == "PARTY")
+      assert(TestAddonPrefix == nil, "ungrouped threat update sent a party/raid query")
       assert(Skada.Threat:GetTitle() == "Threat: Boar")
       GetNumPartyMembers = savedPartyCount
 
@@ -59,7 +69,7 @@ def run(ctx: Context):
       assert(table.getn(Skada.Threat.rows) == 2)
       assert(Skada.Threat.rowsByName.Alice.tps == 600)
       primary:Refresh()
-      assert(string.find(primary.display[2].text, "600 TPS", 1, true))
+      assert(primary.display[2].text == "1834 (600 TPS, 99%)")
 
       local savedAddDoubleLine = GameTooltip.AddDoubleLine
       GameTooltip.captured = {}
@@ -113,6 +123,15 @@ def run(ctx: Context):
       Skada.Threat:TargetChanged()
       estimator:RecordDamage("Alice", aliceIdentity, "Wolf", 200, "Fireball", 133, 100)
       estimator:RecordHealing("Bob", bobIdentity, 200, 100)
+      assert(estimator.enemyCount == 2, "fallback threat enemy count drifted while adding targets")
+
+      local pooledRows = {}
+      local _, pooledCount = estimator:Build("Wolf", "0xE", pooledRows)
+      assert(pooledCount == 2)
+      local firstPooledRow, secondPooledRow = pooledRows[1], pooledRows[2]
+      estimator:Build("Wolf", "0xE", pooledRows)
+      assert(pooledRows[1] == firstPooledRow and pooledRows[2] == secondPooledRow,
+        "fallback threat projection reallocated stable actor rows")
 
       TestSetTarget("Boar", "0xC")
       Skada.Threat:TargetChanged()
@@ -153,10 +172,12 @@ def run(ctx: Context):
       estimator:RemoveEnemy("0xE")
       assert(not estimator.threatByEnemyKey["0xE"] and not estimator.enemyByKey["0xE"])
       assert(not estimator.enemyKeyByName.Wolf)
+      assert(estimator.enemyCount == 1, "fallback threat enemy count drifted while removing a target")
       local removedRows, removedCount = estimator:Build("Wolf", "0xE", {})
       assert(removedCount == 0 and table.getn(removedRows) == 0)
 
       estimator:Reset()
+      assert(estimator.enemyCount == 0)
       local savedUnitExists = UnitExists
       local unitLookupCount = 0
       UnitExists = function(unit)
@@ -179,7 +200,60 @@ def run(ctx: Context):
       estimator:ObserveCurrentEnemy(107)
       assert(not estimator.threatByEnemyKey["0xOLD"] and not estimator.enemyByKey["0xOLD"])
       assert(estimator.enemyKeyByName["Twin Enemy"] == "0xNEW")
+      assert(estimator.enemyCount == 1,
+        "fallback threat enemy count drifted while promoting a name to a GUID")
       TestSetTarget("Wolf", "0xE")
+
+      local wolfIdentity = Skada.Data:GetIdentityByName("Wolf")
+      local savedMergePets = Skada.db.profile.mergePets
+      Skada.db.profile.mergePets = false
+      TestSetPartyMembers(0)
+      estimator:Reset()
+      Skada.Threat:ClearRows(true)
+      Skada.Threat.lastResponse = nil
+      Skada.Threat.lastServerResponse = nil
+      Skada.Threat.usingEstimate = false
+
+      TestSetTarget("Boar", "0xC")
+      Skada.Threat:TargetChanged()
+      TestSetTime(110)
+      estimator:RecordDamage("Alice", aliceIdentity, "Boar", 100, "Fireball", 133, 110)
+      estimator:RecordDamage("Bob", bobIdentity, "Boar", 100, "Fireball", 133, 110)
+      estimator:RecordDamage("Wolf", wolfIdentity, "Boar", 50, "Bite", 1, 110)
+      Skada.Threat:Update(GetTime())
+      assert(Skada.Threat.usingEstimate)
+      assert(Skada.Threat.rowsByName.Alice and Skada.Threat.rowsByName.Alice.threat == 100,
+        "ungrouped threat window dropped the player's own estimate")
+      assert(Skada.Threat.rowsByName.Wolf and Skada.Threat.rowsByName.Wolf.threat == 50,
+        "ungrouped threat window dropped the player's pet estimate")
+      assert(Skada.Threat.rowsByName.Bob == nil,
+        "ungrouped threat window showed a groupmate's estimate")
+      assert(Skada.Threat:GetTitle() == "Threat: Boar (estimated)")
+
+      TestSetPartyMembers(1)
+      Skada.Data:RebuildRoster()
+      estimator:Reset()
+      Skada.Threat:ClearRows(true)
+      TestSetTarget("Boar", "0xC")
+      Skada.Threat:TargetChanged()
+      TestSetTime(112)
+      estimator:RecordDamage("Alice", aliceIdentity, "Boar", 100, "Fireball", 133, 112)
+      estimator:RecordDamage("Bob", bobIdentity, "Boar", 100, "Fireball", 133, 112)
+      local groupedRows, groupedCount = estimator:Build("Boar", "0xC", {})
+      assert(groupedCount == 2)
+
+      TestSetPartyMembers(0)
+      Skada.Data:RebuildRoster()
+      Skada.Threat:GroupChanged()
+      local soloRows, soloCount = estimator:Build("Boar", "0xC", {})
+      assert(soloCount == 1 and soloRows[1].name == "Alice",
+        "leaving a group mid-combat kept a former groupmate's estimated threat")
+
+      TestSetPartyMembers(1)
+      Skada.Data:RebuildRoster()
+      Skada.db.profile.mergePets = savedMergePets
+      TestSetTarget("Wolf", "0xE")
+      Skada.Threat:TargetChanged()
 
       Skada.Threat.requestTarget = "0xE"
       Skada.Threat:OnAddonMessage("CHAT_MSG_ADDON", "SERVER", "TWTv4=Alice:1:5000:100:1")

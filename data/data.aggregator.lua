@@ -7,6 +7,7 @@ local min = math.min
 local max = math.max
 local floor = math.floor
 local table_getn = table.getn
+local table_insert = table.insert
 
 function DataAggregator:NewSet(name, now, isTotal)
   return {
@@ -71,7 +72,7 @@ function DataAggregator:GetActor(set, name, identity)
     activeTime = 0,
   }
   set.actors[name] = actor
-  set.actorList[table_getn(set.actorList) + 1] = actor
+  table_insert(set.actorList, actor)
   return actor
 end
 
@@ -108,16 +109,20 @@ function DataAggregator:AddSpell(actor, field, spellName, spellID, amount, criti
   return spell
 end
 
+local getActor = DataAggregator.GetActor
+local addSpell = DataAggregator.AddSpell
+local touchActor = DataAggregator.TouchActor
+
 function DataAggregator:RecordDamageSet(set, actorName, sourceIdentity, targetActorName, targetIdentity, amount, spellName, spellID, critical, selfDamage, now, rawTargetName, mitigationType, mitigationAmount)
   set.hasData = true
   set.lastTime = now
   if actorName and not selfDamage then
-    local actor = DataAggregator:GetActor(set, actorName, sourceIdentity)
+    local actor = getActor(DataAggregator, set, actorName, sourceIdentity)
     actor.damage = actor.damage + amount
     set.damage = set.damage + amount
     actor.hits = (actor.hits or 0) + 1
-    DataAggregator:AddSpell(actor, "damageSpells", spellName, spellID, amount, critical)
-    if rawTargetName then DataAggregator:AddSpell(actor, "damageTargets", rawTargetName, nil, amount, critical) end
+    addSpell(DataAggregator, actor, "damageSpells", spellName, spellID, amount, critical)
+    if rawTargetName then addSpell(DataAggregator, actor, "damageTargets", rawTargetName, nil, amount, critical) end
     if mitigationType then
       local mitigation = actor.mitigation
       if not mitigation then
@@ -133,20 +138,20 @@ function DataAggregator:RecordDamageSet(set, actorName, sourceIdentity, targetAc
       observation.count = observation.count + 1
       actor.mitigated = (actor.mitigated or 0) + (mitigationAmount or 0)
     end
-    DataAggregator:TouchActor(actor, now)
+    touchActor(DataAggregator, actor, now)
   end
   if targetActorName then
-    local targetActor = DataAggregator:GetActor(set, targetActorName, targetIdentity)
+    local targetActor = getActor(DataAggregator, set, targetActorName, targetIdentity)
     targetActor.damageTaken = targetActor.damageTaken + amount
     set.damageTaken = set.damageTaken + amount
-    DataAggregator:AddSpell(targetActor, "takenSpells", spellName or "Damage", spellID, amount, critical)
+    addSpell(DataAggregator, targetActor, "takenSpells", spellName or "Damage", spellID, amount, critical)
   end
 end
 
 function DataAggregator:RecordHealingSet(set, actorName, identity, amount, effective, overhealing, verified, spellName, spellID, critical, now, rawTargetName)
   set.hasData = true
   set.lastTime = now
-  local actor = DataAggregator:GetActor(set, actorName, identity)
+  local actor = getActor(DataAggregator, set, actorName, identity)
   effective = effective or amount
   overhealing = overhealing or 0
   actor.healing = actor.healing + amount
@@ -160,50 +165,50 @@ function DataAggregator:RecordHealingSet(set, actorName, identity, amount, effec
     set.unverifiedHealing = set.unverifiedHealing + amount
   end
 
-  local spell = DataAggregator:AddSpell(actor, "healingSpells", spellName, spellID, amount, critical)
+  local spell = addSpell(DataAggregator, actor, "healingSpells", spellName, spellID, amount, critical)
   if spell then
     spell.effectiveHealing = (spell.effectiveHealing or 0) + effective
     spell.overhealing = (spell.overhealing or 0) + overhealing
     if not verified then spell.unverifiedHealing = (spell.unverifiedHealing or 0) + amount end
   end
   if rawTargetName then
-    local target = DataAggregator:AddSpell(actor, "healTargets", rawTargetName, nil, amount, critical)
+    local target = addSpell(DataAggregator, actor, "healTargets", rawTargetName, nil, amount, critical)
     if target then
       target.effectiveHealing = (target.effectiveHealing or 0) + effective
       target.overhealing = (target.overhealing or 0) + overhealing
       if not verified then target.unverifiedHealing = (target.unverifiedHealing or 0) + amount end
     end
   end
-  DataAggregator:TouchActor(actor, now)
+  touchActor(DataAggregator, actor, now)
 end
 
 function DataAggregator:RecordPowerSet(set, actorName, identity, amount, spellName, spellID, powerType, now)
   set.hasData = true
   set.lastTime = now
-  local actor = DataAggregator:GetActor(set, actorName, identity)
+  local actor = getActor(DataAggregator, set, actorName, identity)
   actor.power = (actor.power or 0) + amount
   set.power = (set.power or 0) + amount
-  DataAggregator:AddSpell(actor, "powerSpells", spellName, spellID, amount, false)
+  addSpell(DataAggregator, actor, "powerSpells", spellName, spellID, amount, false)
   local spells = actor.powerSpells
   local spell = spells and spells[spellName]
   if spell then spell.powerType = powerType end
-  DataAggregator:TouchActor(actor, now)
+  touchActor(DataAggregator, actor, now)
 end
 
 function DataAggregator:RecordCountSet(set, actorName, identity, field, detailField, detailName, spellID, count, now)
   set.hasData = true
   set.lastTime = now
-  local actor = DataAggregator:GetActor(set, actorName, identity)
+  local actor = getActor(DataAggregator, set, actorName, identity)
   actor[field] = (actor[field] or 0) + count
   set[field] = (set[field] or 0) + count
-  DataAggregator:AddSpell(actor, detailField, detailName or field, spellID, count, false)
-  DataAggregator:TouchActor(actor, now)
+  addSpell(DataAggregator, actor, detailField, detailName or field, spellID, count, false)
+  touchActor(DataAggregator, actor, now)
 end
 
 function DataAggregator:RecordDeathSet(set, actorName, identity, now, killerName, killerSpell)
   set.hasData = true
   set.lastTime = now
-  local actor = DataAggregator:GetActor(set, actorName, identity)
+  local actor = getActor(DataAggregator, set, actorName, identity)
   actor.deaths = actor.deaths + 1
   set.deaths = set.deaths + 1
 

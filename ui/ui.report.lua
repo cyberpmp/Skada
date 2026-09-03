@@ -8,9 +8,10 @@ local setReadableFont = Common.SetFont
 local Style = Skada.UIStyle
 
 local table_getn = table.getn
+local table_insert = table.insert
 local table_sort = table.sort
 
-local FONT = Common.FONT
+local setUiFont = Style.SetUIFont
 
 function Report:CreateHeaderButton(parent, spec)
   local button = CreateFrame("Button", nil, parent)
@@ -86,8 +87,8 @@ function Report:CreateHeaderButton(parent, spec)
     GameTooltip:SetOwner(self, "ANCHOR_TOP")
     GameTooltip:AddLine(spec.title, 1, 1, 1)
     if spec.status then
-      local status, r, g, b = spec.status()
-      if status then GameTooltip:AddLine(status, r or 0.8, g or 0.8, b or 0.8) end
+      local status, red, green, blue = spec.status()
+      if status then GameTooltip:AddLine(status, red or 0.8, green or 0.8, blue or 0.8) end
     end
     if spec.description then GameTooltip:AddLine(spec.description, 0.8, 0.8, 0.8, true) end
     GameTooltip:Show()
@@ -126,8 +127,8 @@ function Report:CreateActionMenu(owner, anchor)
 
     entry.marker = entry:CreateTexture(nil, "ARTWORK")
     entry.marker:SetTexture(Style.WHITE)
-    local ar, ag, ab = Style.UI_ACCENT_R, Style.UI_ACCENT_G, Style.UI_ACCENT_B
-    entry.marker:SetVertexColor(ar, ag, ab, 0.92)
+    local accentRed, accentGreen, accentBlue = Style.UI_ACCENT_R, Style.UI_ACCENT_G, Style.UI_ACCENT_B
+    entry.marker:SetVertexColor(accentRed, accentGreen, accentBlue, 0.92)
     entry.marker:SetWidth(2)
     entry.marker:SetPoint("TOPLEFT", entry, "TOPLEFT", 1, -3)
     entry.marker:SetPoint("BOTTOMLEFT", entry, "BOTTOMLEFT", 1, 3)
@@ -168,7 +169,7 @@ function Report:CreateActionMenu(owner, anchor)
       menu:Hide()
       click()
     end)
-    menu.entries[table_getn(menu.entries) + 1] = entry
+    table_insert(menu.entries, entry)
     menu.byKey[key] = entry
     return entry
   end
@@ -206,9 +207,9 @@ function Report:CreateActionMenu(owner, anchor)
 
   function menu:Refresh()
     local canRemove = table_getn(owner.manager.windows) > 1
-    local offset, i, entry = 4
-    for i = 1, table_getn(self.entries) do
-      entry = self.entries[i]
+    local offset, entryIndex, entry = 4
+    for entryIndex = 1, table_getn(self.entries) do
+      entry = self.entries[entryIndex]
       if entry ~= self.byKey.remove or canRemove then
         if rawget(entry, "gapBefore") then
           offset = offset + 5
@@ -268,30 +269,30 @@ function Report:BuildReportLines(window)
   if mode.live then
     lines[1] = lines[1] .. " (" .. (Skada.Threat and Skada.Threat:GetTitle() or "live") .. ")"
     local rows = Skada.Threat and Skada.Threat.rows or {}
-    local i, row
-    for i = 1, table_getn(rows) do
-      row = rows[i]
-      lines[table_getn(lines) + 1] = tostring(i) .. ". " .. row.name .. " " ..
-        Skada.UIPresenter:FormatThreatText(row)
+    local rowIndex, row
+    for rowIndex = 1, table_getn(rows) do
+      row = rows[rowIndex]
+      table_insert(lines, tostring(rowIndex) .. ". " .. row.name .. " " ..
+        Skada.UIPresenter:FormatThreatText(row))
     end
   else
     lines[1] = lines[1] .. " (" .. Skada.Data:GetSegmentLabel(window.db.segment) .. ")"
     local set = Skada.Data:GetSelectedSet(window.db.segment)
-    local list, i, actor, value, item
+    local list, actorIndex, lineIndex, actor, value, item
     list = {}
-    for i = 1, table_getn(set.actorList) do
-      actor = set.actorList[i]
+    for actorIndex = 1, table_getn(set.actorList) do
+      actor = set.actorList[actorIndex]
       value = Skada.Modes:GetActorValue(mode, actor)
       if value > 0 then
         item = { actor = actor, value = value }
-        list[table_getn(list) + 1] = item
+        table_insert(list, item)
       end
     end
-    table_sort(list, function(a, b) return a.value == b.value and a.actor.name < b.actor.name or a.value > b.value end)
-    for i = 1, table_getn(list) do
-      actor = list[i].actor
-      lines[table_getn(lines) + 1] = tostring(i) .. ". " .. actor.name .. " " ..
-        Skada.Modes:GetActorText(mode, actor, set)
+    table_sort(list, function(left, right) return left.value == right.value and left.actor.name < right.actor.name or left.value > right.value end)
+    for lineIndex = 1, table_getn(list) do
+      actor = list[lineIndex].actor
+      table_insert(lines, tostring(lineIndex) .. ". " .. actor.name .. " " ..
+        Skada.Modes:GetActorText(mode, actor, set))
     end
   end
   if table_getn(lines) == 1 then lines[2] = "(no data)" end
@@ -311,96 +312,124 @@ function Report:Report(window, channel, target)
     end
   end
   local lines = self:BuildReportLines(window)
-  local i
-  for i = 1, table_getn(lines) do SendChatMessage(lines[i], channel, nil, target) end
+  local lineIndex
+  for lineIndex = 1, table_getn(lines) do SendChatMessage(lines[lineIndex], channel, nil, target) end
   if self.reportPopup then self.reportPopup:Hide() end
 end
 
 function Report:ShowReportPopup(window)
-
   if self.reportPopup and not self.reportPopup.title then self.reportPopup = nil end
   if not self.reportPopup then
     local popup = CreateFrame("Frame", "SkadaReportPopup", UIParent)
     self.reportPopup = popup
-    popup:SetWidth(360)
-    popup:SetHeight(112)
+    popup:SetWidth(380)
+    popup:SetHeight(185)
     popup:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     popup:SetFrameStrata("DIALOG")
-    Style:ApplyFlatFrame(popup, 0.985, 0.16, 0.18, 0.23)
-    Style:ApplyShadow(popup, true)
+    popup:SetClampedToScreen(true)
+    popup:SetToplevel(true)
+    popup:SetMovable(true)
+    popup:EnableMouse(true)
+    popup:RegisterForDrag("LeftButton")
+    popup:SetScript("OnDragStart", function() popup:StartMoving() end)
+    popup:SetScript("OnDragStop", function() popup:StopMovingOrSizing() end)
+    Style:ApplyDialogFrame(popup)
+    if UISpecialFrames then table_insert(UISpecialFrames, "SkadaReportPopup") end
 
-    local title = popup:CreateFontString(nil, "OVERLAY")
-    title:SetPoint("TOPLEFT", popup, "TOPLEFT", 10, -8)
-    setReadableFont(title, 14)
+    popup.dialogTitle = Style:CreateDialogTitle(popup, "Skada")
+
+    local pane = CreateFrame("Frame", nil, popup)
+    pane:SetWidth(346)
+    pane:SetHeight(100)
+    pane:SetPoint("TOPLEFT", popup, "TOPLEFT", 17, -36)
+    Style:ApplyPane(pane)
+    popup.pane = pane
+
+    local title = pane:CreateFontString(nil, "OVERLAY")
+    title:SetPoint("TOPLEFT", pane, "TOPLEFT", 10, -9)
+    setUiFont(title, 16)
     title:SetTextColor(0.95, 0.96, 0.99, 1)
     title:SetText("Report Skada meter")
     popup.title = title
 
-    local subtitle = popup:CreateFontString(nil, "OVERLAY")
-    subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -2)
-    setReadableFont(subtitle, 10)
+    local subtitle = pane:CreateFontString(nil, "OVERLAY")
+    subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -3)
+    setUiFont(subtitle, 11)
     subtitle:SetTextColor(Style.MUTED_R, Style.MUTED_G, Style.MUTED_B, 1)
-    subtitle:SetText("Send the current view")
+    subtitle:SetText("Send the current view to a chat channel.")
     popup.subtitle = subtitle
 
-    local whisper = CreateFrame("EditBox", nil, popup)
-    whisper:SetWidth(110)
-    whisper:SetHeight(20)
-    whisper:SetPoint("BOTTOMLEFT", popup, "BOTTOMLEFT", 10, 10)
+    local channels = {
+      { "Guild", "GUILD" }, { "Party/Raid", "GROUP" },
+      { "Say", "SAY" }, { "Whisper", "WHISPER" },
+    }
+    popup.channelButtons = {}
+    local channelIndex, button, previous, spec
+    for channelIndex = 1, table_getn(channels) do
+      spec = channels[channelIndex]
+      local channelLabel, channelType = spec[1], spec[2]
+      button = CreateFrame("Button", nil, pane, "UIPanelButtonTemplate")
+      button:SetWidth(77)
+      button:SetHeight(20)
+      if previous then
+        button:SetPoint("LEFT", previous, "RIGHT", 6, 0)
+      else
+        button:SetPoint("BOTTOMLEFT", pane, "BOTTOMLEFT", 10, 10)
+      end
+      button:SetText(channelLabel)
+      button:SetScript("OnClick", function()
+        local destination = channelType == "GROUP" and ((GetNumRaidMembers and GetNumRaidMembers() or 0) > 0 and "RAID" or "PARTY") or channelType
+        self:Report(popup.window, destination, popup.whisper:GetText())
+      end)
+      table_insert(popup.channelButtons, button)
+      previous = button
+    end
+
+    local targetPane = CreateFrame("Frame", nil, popup)
+    targetPane:SetHeight(24)
+    targetPane:SetPoint("BOTTOMLEFT", popup, "BOTTOMLEFT", 15, 15)
+    targetPane:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", -137, 15)
+    Style:ApplyPane(targetPane, 1)
+    popup.targetPane = targetPane
+
+    local hint = targetPane:CreateFontString(nil, "OVERLAY")
+    hint:SetPoint("LEFT", targetPane, "LEFT", 7, 0)
+    setUiFont(hint, 11)
+    hint:SetText("Whisper:")
+    hint:SetTextColor(Style.GOLD_R, Style.GOLD_G, Style.GOLD_B, 1)
+
+    local whisper = CreateFrame("EditBox", nil, targetPane)
+    whisper:SetWidth(150)
+    whisper:SetHeight(18)
+    whisper:SetPoint("RIGHT", targetPane, "RIGHT", -6, 0)
     whisper:SetAutoFocus(false)
     whisper:SetTextInsets(5, 5, 0, 0)
     whisper:SetBackdrop(Style.FLAT_BACKDROP)
     whisper:SetBackdropColor(0.055, 0.060, 0.075, 1)
     whisper:SetBackdropBorderColor(0.12, 0.13, 0.16, 1)
     whisper:SetTextColor(1, 1, 1, 1)
-    whisper:SetFont(FONT, 12, "OUTLINE")
+    setUiFont(whisper, 12)
+    whisper:SetScript("OnEnterPressed", function()
+      self:Report(popup.window, "WHISPER", whisper:GetText())
+    end)
+    whisper:SetScript("OnEscapePressed", function() whisper:ClearFocus() end)
     popup.whisper = whisper
 
-    local hint = popup:CreateFontString(nil, "OVERLAY")
-    hint:SetPoint("LEFT", whisper, "RIGHT", 6, 0)
-    setReadableFont(hint, 11)
-    hint:SetText("Whisper target")
-    hint:SetTextColor(Style.MUTED_R, Style.MUTED_G, Style.MUTED_B, 1)
+    local close = CreateFrame("Button", nil, popup, "UIPanelButtonTemplate")
+    close:SetPoint("BOTTOMRIGHT", popup, "BOTTOMRIGHT", -27, 17)
+    close:SetWidth(100)
+    close:SetHeight(20)
+    close:SetText(CLOSE or "Close")
+    close:SetScript("OnClick", function()
+      if PlaySound then PlaySound("gsTitleOptionExit") end
+      popup:Hide()
+    end)
+    popup.close = close
 
-    local channels = {
-      { "Guild", "GUILD" }, { "Party/Raid", "GROUP" }, { "Say", "SAY" }, { "Whisper", "WHISPER" },
-    }
-    local i, button, spec
-    for i = 1, table_getn(channels) do
-      spec = channels[i]
-      local channelLabel, channelType = spec[1], spec[2]
-      button = CreateFrame("Button", nil, popup)
-      button:SetWidth(i == 2 and 78 or 62)
-      button:SetHeight(22)
-      button:SetPoint("TOPLEFT", popup, "TOPLEFT", 10 + (i - 1) * 84, -40)
-      button:SetScript("OnClick", function()
-        local destination = channelType == "GROUP" and ((GetNumRaidMembers and GetNumRaidMembers() or 0) > 0 and "RAID" or "PARTY") or channelType
-        self:Report(popup.window, destination, popup.whisper:GetText())
-      end)
-      button.text = button:CreateFontString(nil, "OVERLAY")
-      button.text:SetAllPoints(button)
-      setReadableFont(button.text, 11)
-      button.text:SetText(channelLabel)
-      Style:ApplyButton(button)
-      button:SetScript("OnEnter", function(self) Style:ApplyButton(self, true) end)
-      button:SetScript("OnLeave", function(self) Style:ApplyButton(self, false) end)
-    end
-    local close = CreateFrame("Button", nil, popup)
-    close:SetWidth(18)
-    close:SetHeight(18)
-    close:SetPoint("TOPRIGHT", popup, "TOPRIGHT", -6, -6)
-    Style:ApplyButton(close)
-    close.text = close:CreateFontString(nil, "OVERLAY")
-    close.text:SetAllPoints(close)
-    setReadableFont(close.text, 13)
-    close.text:SetText("x")
-    close.text:SetTextColor(0.72, 0.74, 0.79, 1)
-    close:SetScript("OnEnter", function(self) Style:ApplyButton(self, true) end)
-    close:SetScript("OnLeave", function(self) Style:ApplyButton(self, false) end)
-    close:SetScript("OnClick", function() popup:Hide() end)
+    popup:SetScript("OnHide", function() whisper:ClearFocus() end)
   end
   self.reportPopup.window = window
   self.reportPopup.title:SetText("Report " .. (window.db.name or "Skada") .. " meter")
   self.reportPopup:Show()
-  Style:FadeIn(self.reportPopup, 0.42, 0.11, 1)
+  Style:FadeIn(self.reportPopup, 0.38, 0.13, 1)
 end
