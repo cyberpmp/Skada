@@ -7,6 +7,12 @@ local Skada = env.Skada
 -- with a sidebar tree (General + one row per meter window) and a scroll pane
 -- whose controls are laid out arithmetically.
 --
+-- The chrome is the default UI's own: the dialog-box frame and header
+-- ribbon, tooltip-bordered inset panes for the sidebar and the scroll pane,
+-- quest-log row highlights in the sidebar, a red panel Close button and the
+-- round panel X -- so the window sits among the game's option panels as one
+-- of them rather than as a flat dark overlay.
+--
 -- It replaces the vendored Ace3 stack, whose every rendering symptom on this
 -- client (blank EditBox values, unscrolling scroll frames, strata/level
 -- inversions, single-column panes) was a repair job in core.compat.lua. The
@@ -37,10 +43,12 @@ local table_getn = table.getn
 local table_insert = table.insert
 local table_sort = table.sort
 local tostring = tostring
-local setUiFont = Style.SetUIFont
+local setGoldFont = Style.SetGoldFont
+local setWhiteFont = Style.SetWhiteFont
 
 -- Dialog sizing, derived from the inside out: three 170-unit control cells,
--- scrollbar gutter and pane chrome around them, the sidebar on the left.
+-- scrollbar gutter and pane chrome around them, the sidebar on the left,
+-- the header ribbon above and the Close button's row below.
 local CONTROL_WIDTH = 170
 local COLUMNS = 3
 local CONTENT_WIDTH = COLUMNS * CONTROL_WIDTH          -- 510: control area
@@ -51,18 +59,21 @@ local SIDEBAR_X = 14
 local PANE_X = SIDEBAR_X + TREE_WIDTH + 14             -- 203
 local PANE_WIDTH = CHILD_WIDTH + SCROLLBAR_GUTTER + 12 -- 552
 local DIALOG_WIDTH = PANE_X + PANE_WIDTH + 14          -- 769
-local TITLE_HEIGHT = 46
+local TITLE_HEIGHT = 42
+local BOTTOM_HEIGHT = 46
 local DIALOG_HEIGHT = 560
-local PANE_HEIGHT = DIALOG_HEIGHT - TITLE_HEIGHT - 14  -- 500
+local PANE_HEIGHT = DIALOG_HEIGHT - TITLE_HEIGHT - BOTTOM_HEIGHT -- 472
 local ROW_GAP = 8
 local WHEEL_STEP = 40
 
+-- Sidebar rows sit inside the sidebar pane's tooltip border.
+local SIDEBAR_INSET_X = 4
+local SIDEBAR_INSET_Y = 6
+local SIDEBAR_ROW_WIDTH = TREE_WIDTH - 2 * SIDEBAR_INSET_X
+local SIDEBAR_ROW_HEIGHT = 18
+
 -- Control row heights, owned by the renderers.
 local HEIGHTS = Skada.OptionsControls.HEIGHTS
-
-local function controlHeight(spec)
-  return HEIGHTS[spec.type] or 24
-end
 
 local root
 
@@ -70,27 +81,27 @@ local root
 -- Sidebar
 -- ---------------------------------------------------------------------------
 
+-- A sidebar row is a quest-log title: white small text for a window row,
+-- gold for General, the quest-title highlight on hover, and that same
+-- highlight held lit (the `marker`) with gold text while selected.
 local function createSidebarRow(sidebar)
   local row = CreateFrame("Button", nil, sidebar)
-  row:SetWidth(TREE_WIDTH)
-  row:SetHeight(18)
-  row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+  row:SetWidth(SIDEBAR_ROW_WIDTH)
+  row:SetHeight(SIDEBAR_ROW_HEIGHT)
+  row:SetHighlightTexture(Style.ROW_HIGHLIGHT_TEXTURE)
   local highlight = row.GetHighlightTexture and row:GetHighlightTexture()
   if highlight and highlight.SetBlendMode then highlight:SetBlendMode("ADD") end
 
-  local marker = row:CreateTexture(nil, "ARTWORK")
-  marker:SetTexture(Style.WHITE)
-  marker:SetVertexColor(Style.UI_ACCENT_R, Style.UI_ACCENT_G, Style.UI_ACCENT_B, 0.92)
-  marker:SetWidth(2)
-  marker:SetPoint("TOPLEFT", row, "TOPLEFT", 1, -3)
-  marker:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 1, 3)
+  local marker = row:CreateTexture(nil, "BACKGROUND")
+  marker:SetTexture(Style.ROW_HIGHLIGHT_TEXTURE)
+  if marker.SetBlendMode then marker:SetBlendMode("ADD") end
+  marker:SetAllPoints(row)
   marker:Hide()
   row.marker = marker
 
-  row.text = row:CreateFontString(nil, "BACKGROUND")
-  row.text:SetFontObject(GameFontNormalSmall)
+  row.text = row:CreateFontString(nil, "OVERLAY")
   row.text:SetJustifyH("LEFT")
-  row.text:SetHeight(18)
+  row.text:SetHeight(SIDEBAR_ROW_HEIGHT)
   row.text:SetPoint("LEFT", row, "LEFT", 8, 0)
   row.text:SetPoint("RIGHT", row, "RIGHT", -8, 0)
   return row
@@ -106,14 +117,27 @@ local windowsHeaderRow
 local windowRows = {}
 local generalRow
 
+local function paintSidebarRow(row, selected, topLevel)
+  if selected then
+    row.marker:Show()
+  else
+    row.marker:Hide()
+  end
+  if selected or topLevel then
+    row.text:SetTextColor(Style.GOLD_R, Style.GOLD_G, Style.GOLD_B, 1)
+  else
+    row.text:SetTextColor(1, 1, 1, 1)
+  end
+end
+
 local function paintSidebarSelection()
   if generalRow then
-    if Dialog.selectedGroup == "general" then generalRow.marker:Show() else generalRow.marker:Hide() end
+    paintSidebarRow(generalRow, Dialog.selectedGroup == "general", true)
   end
   local rowIndex
   for rowIndex = 1, table_getn(windowRows) do
     local row = windowRows[rowIndex]
-    if Dialog.selectedGroup == row.groupKey then row.marker:Show() else row.marker:Hide() end
+    paintSidebarRow(row, Dialog.selectedGroup == row.groupKey, false)
   end
 end
 
@@ -129,28 +153,28 @@ function Dialog:RebuildSidebar()
   windowRows = {}
   generalRow = nil
 
-  local y = 0
+  local y = SIDEBAR_INSET_Y
 
   generalRow = createSidebarRow(sidebar)
+  setGoldFont(generalRow.text, true)
   generalRow.text:SetText("General")
-  generalRow.text:SetPoint("LEFT", generalRow, "LEFT", 8, 0)
-  generalRow:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, -y)
+  generalRow:SetPoint("TOPLEFT", sidebar, "TOPLEFT", SIDEBAR_INSET_X, -y)
   generalRow.groupKey = "general"
   generalRow:SetScript("OnClick", function() selectGroup("general") end)
   generalRow:Show()
   table_insert(sidebar.rows, generalRow)
-  y = y + 18
+  y = y + SIDEBAR_ROW_HEIGHT
 
   -- The Windows row is a header, not a button: its label must not steal
   -- clicks, and its right edge carries the plus button that creates a window.
   local headerRow = CreateFrame("Frame", nil, sidebar)
-  headerRow:SetWidth(TREE_WIDTH)
-  headerRow:SetHeight(18)
-  headerRow:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, -y)
-  headerRow.text = headerRow:CreateFontString(nil, "BACKGROUND")
-  headerRow.text:SetFontObject(GameFontNormalSmall)
+  headerRow:SetWidth(SIDEBAR_ROW_WIDTH)
+  headerRow:SetHeight(SIDEBAR_ROW_HEIGHT)
+  headerRow:SetPoint("TOPLEFT", sidebar, "TOPLEFT", SIDEBAR_INSET_X, -y)
+  headerRow.text = headerRow:CreateFontString(nil, "OVERLAY")
+  setGoldFont(headerRow.text, true)
   headerRow.text:SetJustifyH("LEFT")
-  headerRow.text:SetHeight(18)
+  headerRow.text:SetHeight(SIDEBAR_ROW_HEIGHT)
   headerRow.text:SetPoint("LEFT", headerRow, "LEFT", 8, 0)
   headerRow.text:SetText("Windows")
   local plusButton = CreateFrame("Button", nil, headerRow)
@@ -172,22 +196,23 @@ function Dialog:RebuildSidebar()
   headerRow:Show()
   table_insert(sidebar.rows, headerRow)
   windowsHeaderRow = headerRow
-  y = y + 18
+  y = y + SIDEBAR_ROW_HEIGHT
 
   local windows = Skada.UI and Skada.UI.windows or {}
   local windowIndex, window
   for windowIndex = 1, table_getn(windows) do
     window = windows[windowIndex]
     local row = createSidebarRow(sidebar)
+    setWhiteFont(row.text, true)
     row.text:SetText(window.db.name or ("Window " .. tostring(window.db.id)))
     row.text:SetPoint("LEFT", row, "LEFT", 20, 0)
-    row:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, -y)
+    row:SetPoint("TOPLEFT", sidebar, "TOPLEFT", SIDEBAR_INSET_X, -y)
     row.groupKey = "window_" .. tostring(window.db.id)
     row:SetScript("OnClick", function() selectGroup(row.groupKey) end)
     row:Show()
     table_insert(sidebar.rows, row)
     table_insert(windowRows, row)
-    y = y + 18
+    y = y + SIDEBAR_ROW_HEIGHT
   end
 
   SkadaCompat.FixLevels(sidebar)
@@ -252,6 +277,16 @@ local function setScrollChildHeight(content, height)
   end
 end
 
+-- Places a rendered control at its cell's origin, honouring the inset a
+-- renderer asks for (a panel button sits inside its row rather than on the
+-- cell's edge).
+local function placeControl(content, control, cellX, cellY)
+  control:SetPoint("TOPLEFT", content, "TOPLEFT",
+    cellX + (control.cellOffsetX or 0), -(cellY + (control.cellOffsetY or 0)))
+  control:Show()
+  table_insert(root.controls, control)
+end
+
 -- Rebuilds the pane for the selected group: resolves the group's option
 -- specs from the schema (rebuilt fresh on every call), renders each one into
 -- the scroll child, and flows them into three 170-unit columns.
@@ -304,21 +339,13 @@ function Dialog:RebuildPane()
     end
     if isFullRow then
       local control = Controls.Render(content, spec, CONTENT_WIDTH)
-      if control then
-        control:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y)
-        control:Show()
-        table_insert(root.controls, control)
-      end
+      if control then placeControl(content, control, 0, y) end
       y = y + (HEIGHTS[spec.type] or 24) + ROW_GAP
       rowTop = y
     else
       local height = HEIGHTS[spec.type] or 24
       local control = Controls.Render(content, spec, CONTROL_WIDTH)
-      if control then
-        control:SetPoint("TOPLEFT", content, "TOPLEFT", columnIndex * CONTROL_WIDTH, -y)
-        control:Show()
-        table_insert(root.controls, control)
-      end
+      if control then placeControl(content, control, columnIndex * CONTROL_WIDTH, y) end
       if height > rowHeight then rowHeight = height end
       columnIndex = columnIndex + 1
       if columnIndex >= COLUMNS then
@@ -356,9 +383,8 @@ local function createRoot()
     Skada.OptionsControls.ClosePopup()
     if Skada.UI and Skada.UI.ClearSelectionVisual then Skada.UI:ClearSelectionVisual() end
   end)
-  Style:ApplyFlatFrame(root, 0.96, 0.16, 0.18, 0.23)
-  Style:ApplyShadow(root, true)
-  Style:CreateDialogTitle(root, "Skada")
+  Style:ApplyDialogFrame(root)
+  root.dialogTitle = Style:CreateDialogTitle(root, "Skada")
   if UISpecialFrames then
     table_insert(UISpecialFrames, "SkadaOptionsFrame") -- ESC closes
   end
@@ -369,6 +395,7 @@ local function createRoot()
   sidebar:SetWidth(TREE_WIDTH)
   sidebar:SetHeight(PANE_HEIGHT)
   sidebar:SetPoint("TOPLEFT", root, "TOPLEFT", SIDEBAR_X, -TITLE_HEIGHT)
+  Style:ApplyPane(sidebar)
   sidebar.rows = {}
   root.sidebar = sidebar
 
@@ -376,21 +403,18 @@ local function createRoot()
   pane:SetWidth(PANE_WIDTH)
   pane:SetHeight(PANE_HEIGHT)
   pane:SetPoint("TOPLEFT", root, "TOPLEFT", PANE_X, -TITLE_HEIGHT)
+  Style:ApplyPane(pane)
   root.pane = pane
 
   createPaneScrollFrame(pane)
 
-  local close = CreateFrame("Button", nil, root)
-  close:SetWidth(20)
-  close:SetHeight(20)
-  close:SetPoint("TOPRIGHT", root, "TOPRIGHT", -12, -10)
-  Style:ApplyButton(close)
-  close.label = close:CreateFontString(nil, "OVERLAY")
-  close.label:SetJustifyH("CENTER")
-  setUiFont(close.label, 12)
-  close.label:SetText("X")
-  close.label:SetAllPoints(close)
-  close:SetScript("OnClick", function() Skada.Options:Close() end)
+  local function close() Skada.Options:Close() end
+
+  root.closeButton = Style:CreatePanelButton(root, CLOSE or "Close", 100, 22)
+  root.closeButton:SetPoint("BOTTOMRIGHT", root, "BOTTOMRIGHT", -27, 17)
+  root.closeButton:SetScript("OnClick", close)
+
+  root.closeX = Style:CreateCloseButton(root, close)
 
   root:Hide()
   return root

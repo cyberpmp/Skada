@@ -263,7 +263,10 @@ function Schema:BuildGeneralArgs()
         local color = Skada.db.profile.barColor
         return color[1], color[2], color[3]
       end,
-      set = function(info, red, green, blue) Skada.db.profile.barColor = { red, green, blue } end,
+      set = function(info, red, green, blue)
+        Skada.db.profile.barColor = { red, green, blue }
+        Skada:MarkDirty()
+      end,
     },
     spellColors = {
       type = "toggle", order = 13,
@@ -301,7 +304,10 @@ function Schema:BuildGeneralArgs()
         local color = Skada.db.profile.highlightSelfColor
         return color[1], color[2], color[3]
       end,
-      set = function(info, red, green, blue) Skada.db.profile.highlightSelfColor = { red, green, blue } end,
+      set = function(info, red, green, blue)
+        Skada.db.profile.highlightSelfColor = { red, green, blue }
+        Skada:MarkDirty()
+      end,
     },
     barBorder = {
       type = "toggle", order = 18,
@@ -318,7 +324,10 @@ function Schema:BuildGeneralArgs()
         local color = Skada.db.profile.barBorderColor
         return color[1], color[2], color[3]
       end,
-      set = function(info, red, green, blue) Skada.db.profile.barBorderColor = { red, green, blue } end,
+      set = function(info, red, green, blue)
+        Skada.db.profile.barBorderColor = { red, green, blue }
+        Skada:MarkDirty()
+      end,
     },
     dataHeader = { type = "header", name = "Data", order = 20 },
     maxSegments = {

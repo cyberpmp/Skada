@@ -58,7 +58,9 @@ explicit.
    dispel snapshots, interrupt casts, and last-hit evidence. Ambient aura events
    coalesce into a bounded queue that scans one unit per tracking tick; segment
    start queues only unseen group, target, and focus units instead of
-   synchronously enumerating a full roster on the pull path.
+   synchronously enumerating a full roster on the pull path. Combat roster
+   changes use the same queue, skipping fresh cached units so their next buff
+   applications are not suppressed by a redundant pending baseline.
 3. `data/data.lua` normalizes accepted facts and delegates mutations to
    `data/data.aggregator.lua` for both Current and Overall sets.
 4. `modes/modes.lua` projects actor and detail fields without mutating the
@@ -211,9 +213,13 @@ Okay/Cancel children (toplevel off while shown, restored on hide).
 The dialog root is a fixed 769×560 frame at HIGH strata — above the meter
 windows (LOW) and the normal UI (MEDIUM), below DIALOG where the StaticPopup
 confirmations for delete/reset live — not toplevel, `SkadaCompat.FixLevels`
-applied after every build. The sidebar is a plain frame whose rows are built
-from scratch (175×18 buttons with the quest-log highlight, an accent marker
-on the selected row): a General row, a mouse-disabled Windows header whose
+applied after every build. Its chrome is the default UI's own: the untinted
+dialog-box frame and header ribbon (`Style:ApplyDialogFrame`,
+`Style:CreateDialogTitle`), tooltip-bordered inset panes for the sidebar
+and the scroll pane (`Style:ApplyPane`), a red panel Close button and the
+round panel X. The sidebar's rows are built from scratch (167x18 buttons
+with the quest-log highlight on hover, the same highlight held lit with
+gold text on the selected row): a General row, a mouse-disabled Windows header whose
 right edge carries the plus button that creates a window
 (`Skada.UI:CreateNew()` then `Options:SelectWindow`), and one indented row
 per meter window. The pane is a NAMED ScrollFrame from
@@ -229,25 +235,30 @@ positional arguments, and the harness lints Skada's own files for it.
 `options/options.controls.lua` renders the eight leaf types the schema
 emits, one frame per spec, each carrying a back-reference to its spec:
 
-- **toggle/select/color** — flat buttons; the select opens a Skada-owned
-  popup menu (modeled on the report action menu) parented to the dialog
-  root at DIALOG strata so the scroll child's clipping cannot cut it off;
+- **toggle/select/color** — the default UI's check box, dropdown
+  (UIDropDownMenuTemplate's art under a gold caption) and chat color
+  swatch, each with its label; the select opens a Skada-owned popup
+  wearing UIDropDownMenu's list backdrop, parented to the dialog root at
+  DIALOG strata so the scroll child's clipping cannot cut it off;
 - **range** — a from-scratch Slider frame (1.12 has no slider template)
   using the backdrop/thumb texture recipe proven in game, with the current
-  value shown as a plain text label under the track and a `setup`
+  value shown as a plain text label beside the gold caption and a `setup`
   re-entrancy flag around programmatic `SetValue` (the real client fires
   OnValueChanged for every programmatic SetValue);
 - **color** — a swatch button configuring Blizzard's shared
   `ColorPickerFrame`, level-bumped above the dialog and re-layered through
   the compat hook before `Show()`;
-- **input** — the one remaining EditBox (the window name). Text is NEVER
+- **input** — the one remaining EditBox (the window name), wearing
+  InputBoxTemplate's border under a gold caption. Text is NEVER
   set at build time: the value is queued and a one-shot plain-Frame driver
   applies it once a render pass has placed the box (`GetLeft` answers
   non-nil; OnUpdate does not fire on EditBox frames here, and the dialog's
   arithmetic layout never reflows, so one placement suffices). Enter
   commits, Escape reverts to the last committed value;
-- **execute/header** — a full-width action button (routed through
-  StaticPopup confirmations) and a gold heading with a hairline rule.
+- **execute/header** — a red panel button (UIPanelButtonTemplate, routed
+  through StaticPopup confirmations; a full-width row keeps it at a
+  button's width) and the classic centered gold heading with a
+  tooltip-border line out to each edge.
 
 `options/options.schema.lua` builds the whole options table fresh on every
 call to `Schema:BuildOptions()` — a root group with a `general` group (every
@@ -301,12 +312,28 @@ selected window is deleted.
 
 ## Verification
 
+The global table compatibility repairs cache discovered list lengths while
+checking their boundaries for external changes; a `table.setn` shrink
+additionally truncates the table's tail, so Lua-5.0-style callers that
+clear and refill a list (setn(0), insert, setn(display count)) keep tracked
+length and contents in agreement. Sorting uses in-place
+introsort with insertion sort for small ranges and a heapsort fallback at
+the partition-depth limit. This bounds worst-case work to O(n log n) and
+stack depth to O(log n), including sorted and duplicate-heavy input from
+other addons using the global shim.
+
 Run the test suite after changing runtime code, TOC order, SavedVariables,
 parsing, or UI behavior:
 
 ```shell
 python tests/run_tests.py
 ```
+
+`python tests/benchmark.py` prints repeatable host-side parser and sorting
+timings. Compare runs on the same machine and Lua runtime; these timings
+do not measure client frame time. The performance suite separately checks
+sort correctness and comparison bounds, retained memory, cached length
+reads, and coalesced combat roster scans without wall-clock thresholds.
 
 `tests/run_tests.py` is the orchestrator: it lints upvalue aliases, boots the
 stubbed environment from `tests/stubs.lua`, and runs each suite in

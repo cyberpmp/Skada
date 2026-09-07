@@ -458,7 +458,7 @@ def run(ctx: Context):
       local Style = Skada.UIStyle
       assert(popup.width == 380 and popup.height == 185)
       assert(popup.backdrop == Style.DIALOG_BACKDROP and
-        popup.backdropR == 0 and popup.backdropA == 1)
+        popup.backdropR == 1 and popup.backdropA == 1)
       assert(popup.dialogTitle.textValue == "Skada" and
         popup.dialogTitle.textR == Style.GOLD_R and
         popup.dialogTitle.fontPath == Style.UI_FONT)

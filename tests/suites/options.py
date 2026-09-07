@@ -143,6 +143,24 @@ def run(ctx: Context):
       local framesChecked = checkSubtree(dialog, 0)
       assert(framesChecked > 30, "dialog subtree walk found only " .. framesChecked .. " frames")
 
+      -- Chrome: the default UI's own dialog-box frame, untinted (no black
+      -- wash, no drop shadow), tooltip-bordered inset panes, the header
+      -- ribbon's gold title, a red panel Close button and the round X.
+      local Style = Skada.UIStyle
+      assert(dialog.backdrop == Style.DIALOG_BACKDROP and dialog.backdropR == 1
+        and dialog.backdropA == 1, "dialog root must wear the untinted dialog-box frame")
+      assert(rawget(dialog, "skadaShadow") == nil, "classic chrome draws no drop shadow")
+      assert(dialog.dialogTitle.textValue == "Skada" and dialog.dialogTitle.textR == Style.GOLD_R,
+        "dialog must carry the gold header-ribbon title")
+      assert(dialog.sidebar.backdrop == Style.PANE_BACKDROP
+        and dialog.pane.backdrop == Style.PANE_BACKDROP,
+        "sidebar and pane must be tooltip-bordered insets")
+      assert(dialog.closeButton and dialog.closeButton.frameType == "Button"
+        and dialog.closeButton.textValue == "Close",
+        "dialog must carry a panel Close button")
+      assert(dialog.closeX and rawget(dialog.closeX, "normalTexture") == Style.CLOSE_BUTTON_TEXTURE,
+        "dialog must carry the round panel X")
+
       -- Sidebar: General row first, then the Windows header (a plain Frame,
       -- so its label takes no clicks) with its plus button, then one row per
       -- meter window.
@@ -162,7 +180,16 @@ def run(ctx: Context):
       local windowRowIndex
       for windowRowIndex = 3, table.getn(rows) do
         assert(rows[windowRowIndex].frameType == "Button", "window rows must be clickable")
+        -- Unselected window rows read in white; the selected row (General
+        -- here) lights the quest-log highlight and turns gold.
+        assert(not rows[windowRowIndex].marker:IsShown(), "unselected rows must not light up")
+        assert(rows[windowRowIndex].text.textR == 1 and rows[windowRowIndex].text.textG == 1,
+          "unselected window rows must read in white")
       end
+      assert(rows[1].marker.texture == Style.ROW_HIGHLIGHT_TEXTURE,
+        "the selection marker must be the quest-log highlight")
+      assert(rows[1].text.textR == Style.GOLD_R and rows[1].text.textG == Style.GOLD_G,
+        "the General row must read in gold")
 
       -- Pane: the General group renders every one of its rows as a control,
       -- laid out arithmetically inside the scroll child.
@@ -180,10 +207,20 @@ def run(ctx: Context):
       -- Every built control must carry a back-reference to its spec, and the
       -- rendered types must match the schema's.
       local controlIndex, control
+      local executeSeen = false
       for controlIndex = 1, table.getn(dialog.controls) do
         control = dialog.controls[controlIndex]
         assert(control.spec and control.spec.type, "a pane control lost its spec reference")
+        if control.spec.type == "execute" then
+          executeSeen = true
+          -- The panel button sits inset in its row rather than on the cell's
+          -- edge, and a full-width row keeps it at a button's width.
+          assert(control.lastPointX == 4 and control.lastPointY < 0,
+            "execute button must be placed at its cell inset")
+          assert(control:GetWidth() == 200, "full-width execute must keep a button's width")
+        end
       end
+      assert(executeSeen, "General pane must carry an execute button")
 
       -- Opening shows the selection highlight on the active window without
       -- ever replacing its configured border color.
@@ -205,6 +242,18 @@ def run(ctx: Context):
       assert(table.getn(dialog.controls) == 24,
         "window pane did not build every control: " .. table.getn(dialog.controls))
       checkSubtree(dialog, 0)
+      local litRows = 0
+      for windowRowIndex = 1, table.getn(dialog.sidebar.rows) do
+        local sidebarRow = dialog.sidebar.rows[windowRowIndex]
+        if sidebarRow.marker and sidebarRow.marker:IsShown() then
+          litRows = litRows + 1
+          assert(sidebarRow.groupKey == "window_" .. tostring(primary.db.id),
+            "only the selected window's row may light up")
+          assert(sidebarRow.text.textR == Style.GOLD_R and sidebarRow.text.textG == Style.GOLD_G,
+            "the selected window row must turn gold")
+        end
+      end
+      assert(litRows == 1, "exactly one sidebar row must be lit, got " .. litRows)
       local inputSeen, rangeSeen = false, false
       for controlIndex = 1, table.getn(dialog.controls) do
         control = dialog.controls[controlIndex]
@@ -278,6 +327,8 @@ def run(ctx: Context):
       }
       local toggleButton = Controls.Render(anchor, toggleSpec, 170)
       assert(toggleButton.frameType == "Button")
+      assert(toggleButton.checkMark.texture == Skada.UIStyle.CHECK_MARK_TEXTURE,
+        "toggle must draw the default UI's check mark")
       assert(toggleButton.checkMark:IsShown(), "check mark must show for a true value")
       toggleButton.OnClick(toggleButton)
       assert(toggleValue == false, "toggle click did not commit the flipped value")
@@ -298,6 +349,7 @@ def run(ctx: Context):
       }
       local selectButton = Controls.Render(anchor, selectSpec, 170)
       assert(selectButton.frameType == "Button")
+      assert(selectButton.valueText:GetText() == "Alpha")
       selectButton.OnClick(selectButton)
       local popup = dialog.selectPopup
       assert(popup and popup:IsShown(), "select click did not open the popup")
@@ -305,6 +357,10 @@ def run(ctx: Context):
       assert(popup:GetFrameStrata() == "DIALOG",
         "popup must ride above the HIGH dialog, got " .. tostring(popup:GetFrameStrata()))
       assert(table.getn(popup.entries) == 3, "popup must hold one entry per choice")
+      assert(popup.backdrop == Skada.UIStyle.MENU_BACKDROP,
+        "popup must wear the default UI's dropdown list frame")
+      assert(popup.entries[1].marker.texture == Skada.UIStyle.CHECK_MARK_TEXTURE,
+        "the current value's marker must be the default UI's check mark")
       assert(popup.entries[1].text.textValue == "Alpha"
         and popup.entries[2].text.textValue == "Beta"
         and popup.entries[3].text.textValue == "Gamma", "popup labels must follow values()")
@@ -313,10 +369,32 @@ def run(ctx: Context):
       popup.entries[3].OnClick(popup.entries[3])
       assert(selectValue == "c", "picking an entry did not commit its value")
       assert(not popup:IsShown(), "picking an entry must close the popup")
+      assert(selectButton.valueText:GetText() == "Gamma",
+        "picking an entry must repaint the dropdown without changing pages")
       selectButton.OnClick(selectButton)
       assert(popup:IsShown() and popup.entries[3].marker:IsShown(),
         "reopening must repaint the marker onto the current value")
       popup:Hide()
+
+      -- The shared popup must repaint the dropdown that opened it, using
+      -- the committed value even when the setter normalizes the selection.
+      local otherValue = "a"
+      local otherButton = Controls.Render(anchor, {
+        type = "select", name = "Other select",
+        values = selectSpec.values, sorting = selectSpec.sorting,
+        get = function() return otherValue end,
+        set = function(info, value) otherValue = value == "c" and "b" or value end,
+      }, 170)
+      otherButton.OnClick(otherButton)
+      popup.entries[3].OnClick(popup.entries[3])
+      assert(otherButton.valueText:GetText() == "Beta",
+        "dropdown must display the committed value after normalization")
+      assert(selectButton.valueText:GetText() == "Gamma",
+        "reused popup repainted the wrong dropdown")
+      selectButton.OnClick(selectButton)
+      popup.entries[1].OnClick(popup.entries[1])
+      assert(selectButton.valueText:GetText() == "Alpha")
+      assert(otherButton.valueText:GetText() == "Beta")
 
       -- Colors: the swatch click shows Blizzard's shared picker above this
       -- dialog, with the compat OnShow hook carrying the layering down to
@@ -368,6 +446,10 @@ def run(ctx: Context):
         func = function(info) executed = info ~= nil end,
       }
       local executeButton = Controls.Render(anchor, executeSpec, 510)
+      assert(executeButton.frameType == "Button" and executeButton.textValue == "Test execute",
+        "execute must be a panel button carrying its own label")
+      assert(executeButton.cellOffsetX == 4 and executeButton.cellOffsetY == 3,
+        "execute must ask the dialog for its row inset")
       executeButton.OnClick(executeButton)
       assert(executed, "execute click did not run its func")
 

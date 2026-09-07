@@ -295,9 +295,7 @@ end
 function AuraScanner:OnUnitAura(unit)
   if not unit then return end
   local active = Skada.Data and Skada.Data.active
-  local now
   if active then
-    now = GetTime()
     if not self.dirtyAuraUnits[unit] then
       self.dirtyAuraUnits[unit] = true
       table_insert(self.dirtyAuraQueue, unit)
@@ -307,7 +305,7 @@ function AuraScanner:OnUnitAura(unit)
   end
 
   if table_getn(self.pendingDispels) == 0 then return end
-  now = now or GetTime()
+  local now = GetTime()
   local dispelIndex
   for dispelIndex = table_getn(self.pendingDispels), 1, -1 do
     local pending = self.pendingDispels[dispelIndex]

@@ -1,4 +1,5 @@
-local Skada = (_G or getfenv(0)).Skada
+local env = _G or getfenv(0)
+local Skada = env.Skada
 
 local Style = {}
 Skada.UIStyle = Style
@@ -51,6 +52,34 @@ Style.PANE_BACKDROP = {
   tile = true, tileSize = 16, edgeSize = 16,
   insets = { left = 3, right = 3, top = 5, bottom = 3 },
 }
+
+-- The default UI's dropdown list frame (UIDropDownMenu's own backdrop and
+-- insets), worn by the settings dialog's select popup.
+Style.MENU_BACKDROP = {
+  bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+  edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+  tile = true, tileSize = 32, edgeSize = 32,
+  insets = { left = 11, right = 12, top = 12, bottom = 11 },
+}
+
+-- Classic control art, all from the client's own FrameXML templates: the
+-- quest-log row highlight, the check box with its glow and mark, the
+-- dropdown frame and arrow, the input-box border, the chat color swatch,
+-- the tooltip-border strip headings draw their lines from, and the panel X.
+Style.ROW_HIGHLIGHT_TEXTURE = "Interface\\QuestFrame\\UI-QuestTitleHighlight"
+Style.CHECK_BOX_TEXTURE = "Interface\\Buttons\\UI-CheckBox-Up"
+Style.CHECK_BOX_HIGHLIGHT_TEXTURE = "Interface\\Buttons\\UI-CheckBox-Highlight"
+Style.CHECK_MARK_TEXTURE = "Interface\\Buttons\\UI-CheckBox-Check"
+Style.DROPDOWN_TEXTURE = "Interface\\Glues\\CharacterCreate\\CharacterCreate-LabelFrame"
+Style.DROPDOWN_ARROW_TEXTURE = "Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up"
+Style.DROPDOWN_ARROW_PUSHED_TEXTURE = "Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Down"
+Style.MOUSE_HIGHLIGHT_TEXTURE = "Interface\\Buttons\\UI-Common-MouseHilight"
+Style.INPUT_BORDER_TEXTURE = "Interface\\Common\\Common-Input-Border"
+Style.COLOR_SWATCH_TEXTURE = "Interface\\ChatFrame\\ChatFrameColorSwatch"
+Style.HEADING_LINE_TEXTURE = "Interface\\Tooltips\\UI-Tooltip-Border"
+Style.CLOSE_BUTTON_TEXTURE = "Interface\\Buttons\\UI-Panel-MinimizeButton-Up"
+Style.CLOSE_BUTTON_PUSHED_TEXTURE = "Interface\\Buttons\\UI-Panel-MinimizeButton-Down"
+Style.CLOSE_BUTTON_HIGHLIGHT_TEXTURE = "Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight"
 
 Style.UI_FONT = "Fonts\\FRIZQT__.TTF"
 if GameFontNormal and GameFontNormal.GetFont then
@@ -142,9 +171,93 @@ function Style.SetUIFont(fontString, size)
   fontString:SetFont(Style.UI_FONT, size)
 end
 
+-- The client's own dialog frame, untinted: the same grey stone the default
+-- UI's option panels and static popups draw, not the black wash AceGUI's
+-- Frame widget lays over it.
 function Style:ApplyDialogFrame(frame)
   frame:SetBackdrop(self.DIALOG_BACKDROP)
-  frame:SetBackdropColor(0, 0, 0, 1)
+  frame:SetBackdropColor(1, 1, 1, 1)
+end
+
+-- Classic typography: the client's own font objects (the gold GameFontNormal
+-- family for labels, the white GameFontHighlight family for values) so the
+-- dialogs read like the default UI and follow whatever font the player's UI
+-- uses. The harness defines no font objects; the fallback is the same face
+-- at the object's size and color.
+function Style.SetGameFont(fontString, fontObjectName, size, red, green, blue)
+  local fontObject = env[fontObjectName]
+  if fontObject then
+    fontString:SetFontObject(fontObject)
+  else
+    fontString:SetFont(Style.UI_FONT, size)
+  end
+  fontString:SetTextColor(red, green, blue, 1)
+end
+
+function Style.SetGoldFont(fontString, small)
+  Style.SetGameFont(fontString, small and "GameFontNormalSmall" or "GameFontNormal",
+    small and 10 or 12, Style.GOLD_R, Style.GOLD_G, Style.GOLD_B)
+end
+
+function Style.SetWhiteFont(fontString, small)
+  Style.SetGameFont(fontString, small and "GameFontHighlightSmall" or "GameFontHighlight",
+    small and 10 or 12, 1, 1, 1)
+end
+
+-- The default UI's InputBoxTemplate border: three slices of
+-- Common-Input-Border (8-wide caps, a stretched middle, 20 tall) on the
+-- EditBox's own BACKGROUND layer, the left cap hanging 5 outside the box
+-- exactly as the template's does; the text is the chat font in white.
+function Style:ApplyInputBorder(editBox)
+  local left = editBox:CreateTexture(nil, "BACKGROUND")
+  left:SetTexture(self.INPUT_BORDER_TEXTURE)
+  left:SetTexCoord(0, 0.0625, 0, 0.625)
+  left:SetWidth(8)
+  left:SetHeight(20)
+  left:SetPoint("LEFT", editBox, "LEFT", -5, 0)
+
+  local right = editBox:CreateTexture(nil, "BACKGROUND")
+  right:SetTexture(self.INPUT_BORDER_TEXTURE)
+  right:SetTexCoord(0.9375, 1, 0, 0.625)
+  right:SetWidth(8)
+  right:SetHeight(20)
+  right:SetPoint("RIGHT", editBox, "RIGHT", 0, 0)
+
+  local middle = editBox:CreateTexture(nil, "BACKGROUND")
+  middle:SetTexture(self.INPUT_BORDER_TEXTURE)
+  middle:SetTexCoord(0.0625, 0.9375, 0, 0.625)
+  middle:SetHeight(20)
+  middle:SetPoint("LEFT", left, "RIGHT", 0, 0)
+  middle:SetPoint("RIGHT", right, "LEFT", 0, 0)
+
+  editBox:SetTextInsets(4, 4, 0, 0)
+  Style.SetGameFont(editBox, "ChatFontNormal", 12, 1, 1, 1)
+end
+
+-- The default UI's red panel button (UIPanelButtonTemplate crops the 128x32
+-- button art to its drawn face itself; the label is the button's own).
+function Style:CreatePanelButton(parent, text, width, height)
+  local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+  button:SetWidth(width)
+  button:SetHeight(height or 22)
+  button:SetText(text)
+  return button
+end
+
+-- The default UI's round X (UIPanelCloseButton's art) in the top-right
+-- corner of a dialog-box frame.
+function Style:CreateCloseButton(frame, onClick)
+  local close = CreateFrame("Button", nil, frame)
+  close:SetWidth(32)
+  close:SetHeight(32)
+  close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -5, -5)
+  close:SetNormalTexture(self.CLOSE_BUTTON_TEXTURE)
+  close:SetPushedTexture(self.CLOSE_BUTTON_PUSHED_TEXTURE)
+  close:SetHighlightTexture(self.CLOSE_BUTTON_HIGHLIGHT_TEXTURE)
+  local highlight = close.GetHighlightTexture and close:GetHighlightTexture()
+  if highlight and highlight.SetBlendMode then highlight:SetBlendMode("ADD") end
+  close:SetScript("OnClick", onClick)
+  return close
 end
 
 function Style:ApplyPane(frame, alpha)

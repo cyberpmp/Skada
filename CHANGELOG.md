@@ -2,6 +2,44 @@
 
 All notable changes to the PMP Skada rewrite are documented here.
 
+## 2.0.1 - 2026-09-07
+
+### Changed
+
+- The minimap button now shows the client's lightning-bolt spell icon inside
+  its circular frame instead of a bare letter.
+- The settings dialog wears the default UI's own look instead of a flat
+  dark overlay: the untinted dialog-box frame and header ribbon,
+  tooltip-bordered inset panes, quest-log row highlights in the sidebar,
+  the game's check boxes, dropdowns, input-box border, chat color
+  swatches and red panel buttons, with gold captions and white values in
+  the client's font objects. The report popup's whisper box shares the
+  input-box border, and both dialogs drop the black tint over the frame.
+- Bound compatibility sorting to O(n log n) worst-case work, avoiding CPU and
+  stack spikes on sorted or equal-valued lists, including other addons' lists.
+- Cache discovered list lengths while still detecting external appends and
+  removals, avoiding repeated full-list scans in the global compatibility shim.
+- Queue unseen or stale group aura baselines on combat roster changes instead
+  of scanning the full group synchronously. Fresh caches and immediate pending
+  dispel resolution are preserved; queued aura events avoid unused clock reads.
+- Add a repeatable host-side benchmark and regression checks for sort cost,
+  list-length caching, and combat roster bursts.
+
+### Fixed
+
+- Changing the bar color, bar border color, or "My bar highlight color" now
+  repaints the meters immediately instead of waiting for the next toggle or
+  page switch to trigger a rebuild.
+- The mail window's recipient autocomplete bubble (TurtleMail) no longer
+  balloons over the send window or suggests names left over from earlier
+  keystrokes: a `table.setn` shrink is now a real truncation, so Lua-5.0-style
+  callers that clear and refill a list get one whose tracked length matches
+  its contents again.
+- Long checkbox and color-swatch labels wrap onto two lines, with taller
+  settings rows to keep adjacent controls clear.
+- Settings dropdowns now immediately display the saved selection without
+  requiring a switch to another settings page and back.
+
 ## 2.0.0 - 2026-09-07
 
 ### Added

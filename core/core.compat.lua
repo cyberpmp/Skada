@@ -146,10 +146,25 @@ do
     end
     local i = 1
     while t[i] ~= nil do i = i + 1 end
+    sizes[t] = i - 1
     return i - 1
   end
   local function setn(t, n)
-    if checkint(rawget(t, "n")) then rawset(t, "n", n) else sizes[t] = n end
+    if checkint(rawget(t, "n")) then rawset(t, "n", n) else
+      -- A shrink is a length contract, not a note beside the data. Lua-5.0
+      -- callers (TurtleMail's recipient autocomplete, for one) do
+      -- table.setn(list, 0) to clear a list, refill it with table.insert,
+      -- then setn-truncate it to a display count while the table still
+      -- physically holds every candidate. Letting the tail survive desyncs
+      -- every later length read -- our rescan answers the physical length
+      -- (stale entries at the front, fresh inserts behind them, popups
+      -- sized from every match on the realm) and the native global getn
+      -- binary-searches the same -- so a shrink nils the tail and content
+      -- and tracked length agree again.
+      local i
+      for i = n + 1, realgetn(t) do t[i] = nil end
+      sizes[t] = n
+    end
   end
   table.getn = realgetn
   table.setn = setn
@@ -195,27 +210,76 @@ do
   -- against nil holes past the real end -- which does not crash (the
   -- comparator function is never necessarily called against the nil tail for
   -- small real-element counts) but silently corrupts the ordering of the
-  -- real elements at the front. Replace it outright with a pure-Lua
-  -- quicksort driven only by our own already-proven-correct table.getn, so
-  -- it can never trust a native length fact we have no way to keep in sync.
-  local function quicksort(t, comp, lo, hi)
-    if lo >= hi then return end
-    local pivot = t[hi]
-    local i = lo - 1
-    local j
-    for j = lo, hi - 1 do
-      if comp(t[j], pivot) then
-        i = i + 1
-        t[i], t[j] = t[j], t[i]
+  -- real elements at the front. Use an in-place introsort driven by realgetn.
+  -- The previous last-pivot quicksort took quadratic time and linear stack
+  -- depth on sorted or equal values. This global shim also serves other
+  -- addons, so bound every input to O(n log n) work and O(log n) stack space.
+  local function siftDown(t, comp, root, size, offset)
+    local value = t[offset + root]
+    local child = root * 2
+    while child <= size do
+      if child < size and comp(t[offset + child], t[offset + child + 1]) then child = child + 1 end
+      if not comp(value, t[offset + child]) then break end
+      t[offset + root] = t[offset + child]
+      root = child
+      child = root * 2
+    end
+    t[offset + root] = value
+  end
+  local function heapsort(t, comp, lo, hi)
+    local size, offset = hi - lo + 1, lo - 1
+    local root
+    for root = math.floor(size / 2), 1, -1 do siftDown(t, comp, root, size, offset) end
+    local last
+    for last = size, 2, -1 do
+      t[lo], t[offset + last] = t[offset + last], t[lo]
+      siftDown(t, comp, 1, last - 1, offset)
+    end
+  end
+  local function introsort(t, comp, lo, hi, depth)
+    while hi - lo > 12 do
+      if depth == 0 then heapsort(t, comp, lo, hi); return end
+      depth = depth - 1
+      local pivot = t[math.floor((lo + hi) / 2)]
+      local left, right = lo, hi
+      repeat
+        while comp(t[left], pivot) do left = left + 1 end
+        while comp(pivot, t[right]) do right = right - 1 end
+        if left <= right then
+          t[left], t[right] = t[right], t[left]
+          left, right = left + 1, right - 1
+        end
+      until left > right
+      -- Recurse only into the smaller side, keeping stack depth logarithmic.
+      if right - lo < hi - left then
+        introsort(t, comp, lo, right, depth)
+        lo = left
+      else
+        introsort(t, comp, left, hi, depth)
+        hi = right
       end
     end
-    t[i + 1], t[hi] = t[hi], t[i + 1]
-    quicksort(t, comp, lo, i)
-    quicksort(t, comp, i + 2, hi)
+    -- Insertion sort avoids partition overhead on small ranges.
+    local index
+    for index = lo + 1, hi do
+      local value, previous = t[index], index - 1
+      while previous >= lo and comp(value, t[previous]) do
+        t[previous + 1] = t[previous]
+        previous = previous - 1
+      end
+      t[previous + 1] = value
+    end
   end
   local function ascending(a, b) return a < b end
   table.sort = function(t, comp)
-    quicksort(t, comp or ascending, 1, realgetn(t))
+    local size = realgetn(t)
+    if size < 2 then return end
+    local depth, remaining = 0, size
+    while remaining > 1 do
+      depth = depth + 2
+      remaining = math.floor(remaining / 2)
+    end
+    introsort(t, comp or ascending, 1, size, depth)
   end
 end
 

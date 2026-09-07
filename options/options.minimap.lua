@@ -5,7 +5,6 @@ Skada.MinimapButton = MinimapButton
 
 local Common = Skada.Common
 local getClickButton = Common.GetClickButton
-local setFont = Common.SetFont
 local attachTooltip = Common.AttachTooltip
 
 local cos = math.cos
@@ -43,11 +42,15 @@ function MinimapButton:Create()
   })
   instance:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
 
-  local label = instance:CreateFontString(nil, "OVERLAY")
-  label:SetAllPoints(instance)
-  setFont(label, 16)
-  label:SetText("S")
-  label:SetTextColor(1, 0.6, 0.15, 1)
+  -- The lightning bolt, from the client's own spell icon, cropped inward so
+  -- its square corners stay inside the circular tracking border's ring --
+  -- the usual minimap-button look of an icon inside a round frame.
+  local icon = instance:CreateTexture(nil, "ARTWORK")
+  icon:SetTexture("Interface\\Icons\\Spell_Nature_Lightning")
+  icon:SetWidth(20)
+  icon:SetHeight(20)
+  icon:SetPoint("CENTER", instance, "CENTER", 0, 0)
+  icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
   instance:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 

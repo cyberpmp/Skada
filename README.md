@@ -142,6 +142,22 @@ while a segment is active.
 
 ## Accuracy and client limitations
 
+### Performance
+
+Skada uses CPU and memory to collect combat data; zero FPS impact cannot be
+guaranteed. Display rebuilds run at most four times per second, rows are
+reused, and group aura baselines are spread across tracking ticks. Newly
+observed units may therefore take several ticks to establish an aura baseline
+during a roster burst. Pending dispel snapshots still resolve immediately.
+
+After updating, run `/reload`. To assess actual gameplay impact, compare frame
+times with Skada enabled and disabled across several comparable fights using
+the same graphics settings and other addons. A quiet scene alone does not
+exercise raid combat processing. Host-side timing checks are available through
+`python tests/benchmark.py`; they do not predict in-game FPS.
+
+### Combat data
+
 Vanilla does not provide `COMBAT_LOG_EVENT_UNFILTERED`. Damage and healing are
 therefore parsed from localized `CHAT_MSG_COMBAT_*` text, then enriched with
 ClassicAPI unit, GUID, cast, aura, and creature information.
