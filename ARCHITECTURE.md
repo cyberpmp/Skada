@@ -20,7 +20,7 @@ Skada/
 |-- data/       Identity, aggregation, segments, boss detection, and resets
 |-- threat/     Server threat provider and local fallback estimator
 |-- tracking/   Cast, aura, spell, group, and damage observation
-|-- combat/     Combat-text parser and routing
+|-- combat/     Nampower event ingest, combat-text parser, and routing
 |-- modes/      Meter-mode projections
 |-- ui/         Window presentation, rendering, reporting, and docking
 |-- options/    Settings schema, dialog and control renderers, and minimap entry point
@@ -42,7 +42,7 @@ ownership clear in search results while preserving explicit TOC ordering.
 | Identity and data | `data/data.identity.lua`, `data/data.aggregator.lua`, `data/data.boss.lua`, `data/data.segments.lua`, `data/data.navigation.lua`, `data/data.lua`, `data/data.reset.lua` | Roster and pet ownership, aggregate mutation, boss recognition, segment lifecycle, history navigation, the data facade, and reset policies |
 | Threat | `threat/threat.estimate.lua`, `threat/threat.lua` | Combat-scoped local estimates and the authoritative OctoWoW Threat API v4 provider |
 | Enrichment | `tracking/tracking.spells.lua`, `tracking/tracking.casts.lua`, `tracking/tracking.auras.lua`, `tracking/tracking.damage.lua`, `tracking/tracking.group.lua`, `tracking/tracking.lua` | Spell metadata, cast correlation, dispels, interrupts, aura uptime, last-hit evidence, and group observation |
-| Parsing and projection | `combat/combat.parser.lua`, `modes/modes.lua` | Combat-text routing and projection of aggregates into meter modes |
+| Parsing and projection | `combat/combat.parser.lua`, `combat/combat.nampower.lua`, `modes/modes.lua` | Combat-text routing, Nampower server-event ingest, and projection of aggregates into meter modes |
 | Window UI | `ui/ui.config.lua`, `ui/ui.presenter.lua`, `ui/ui.rows.lua`, `ui/ui.snap.lua`, `ui/ui.report.lua`, `ui/ui.lua` | Per-window persistence, display models, pooled row rendering, snapping, reporting, and window composition |
 | Settings and entry points | `options/options.schema.lua`, `options/options.controls.lua`, `options/options.dialog.lua`, `options/options.minimap.lua`, `options/options.lua`, `commands/commands.lua` | Declarative options table, control renderers, the settings dialog itself, minimap access, the settings facade, and slash commands |
 
@@ -52,8 +52,14 @@ explicit.
 
 ## Data flow
 
+0. `combat/combat.nampower.lua` is the authoritative source when Nampower and
+   GUID-addressable unit tokens are both present. It reads damage, healing,
+   power, avoidance, dispels and deaths from the server's own events and
+   suppresses exactly those routes in the parser. See `docs/NAMPOWER.md`.
 1. `combat/combat.parser.lua` compiles client combat formats once and routes
-   only the chat events on which each format can occur.
+   only the chat events on which each format can occur. It stays the only
+   source for interrupts, crowd control and aura uptime, and the fallback for
+   everything else when the ingest is inactive.
 2. Tracking services enrich sparse text with spell IDs, GUIDs, aura sources,
    dispel snapshots, interrupt casts, and last-hit evidence. Ambient aura events
    coalesce into a bounded queue that scans one unit per tracking tick; segment

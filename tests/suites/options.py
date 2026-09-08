@@ -193,7 +193,7 @@ def run(ctx: Context):
 
       -- Pane: the General group renders every one of its rows as a control,
       -- laid out arithmetically inside the scroll child.
-      assert(table.getn(dialog.controls) == 28,
+      assert(table.getn(dialog.controls) == 29,
         "General pane did not build every control: " .. table.getn(dialog.controls))
       assert(dialog.content:GetWidth() == 518,
         "scroll child must carry the arithmetic width, got " .. tostring(dialog.content:GetWidth()))
@@ -504,9 +504,10 @@ def run(ctx: Context):
       assert(options.args.windows and options.args.windows.type == "group")
 
       local generalArgs = options.args.general.args
-      assert(countKeys(generalArgs) == 28, "General must hold every global row")
+      assert(countKeys(generalArgs) == 29, "General must hold every global row")
       local globalKeys = {
         mergePets = true, trackAll = true, combatLogging = true, minimap = true,
+        useNampower = true,
         behaviorHeader = true, appearanceHeader = true,
         windowBorderStyle = true, windowBorderColor = true, barTexture = true,
         fontName = true, classColors = true, barColor = true, spellColors = true,
@@ -939,7 +940,7 @@ def run(ctx: Context):
       Skada.Options:Open()
       dialog = Skada.OptionsDialog.Frame()
       assert(dialog:IsShown(), "Open did not reshow the dialog")
-      assert(table.getn(dialog.controls) == 28, "reopen did not rebuild the pane")
+      assert(table.getn(dialog.controls) == 29, "reopen did not rebuild the pane")
       assert(table.getn(dialog.sidebar.rows) == 2 + table.getn(Skada.UI.windows),
         "reopen did not rebuild the sidebar")
       assert(borderEdges[1].vertexR == configuredBorder[1],

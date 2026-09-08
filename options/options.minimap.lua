@@ -14,6 +14,14 @@ local rad = math.rad
 local atan2 = math.atan2 or math.atan
 local abs = math.abs
 
+-- 78px is the conventional "flush against the minimap circle" radius most
+-- Ace2/LibDBIcon-era minimap buttons use (SuperAPI's FuBarPlugin-based icon
+-- included, at 80px) -- the ring texture below is drawn to sit right against
+-- that edge, so pushing the radius out from here leaves a visible gap
+-- between the button and the minimap (reported in game). The button
+-- collision this radius was once bumped out to dodge (see CHANGELOG 2.0.2)
+-- turned out to be a real bug elsewhere -- other addons' icons going
+-- missing, not a genuine overlap risk -- so there is nothing left to dodge.
 local MINIMAP_RADIUS = 78
 
 local button
@@ -32,25 +40,27 @@ function MinimapButton:Create()
   instance:SetFrameStrata("MEDIUM")
   instance:SetWidth(31)
   instance:SetHeight(31)
-  instance:SetBackdrop({
-    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
-    edgeFile = "Interface\\Minimap\\MiniMap-TrackingBorder",
-    tile = true,
-    tileSize = 16,
-    edgeSize = 16,
-    insets = { left = 5, right = 5, top = 5, bottom = 5 },
-  })
-  instance:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
+  instance:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
 
-  -- The lightning bolt, from the client's own spell icon, cropped inward so
-  -- its square corners stay inside the circular tracking border's ring --
-  -- the usual minimap-button look of an icon inside a round frame.
-  local icon = instance:CreateTexture(nil, "ARTWORK")
+  -- Same construction every other minimap button on this client uses
+  -- (SuperAPI's FuBarPlugin-based icon included): the icon texture on its
+  -- own BACKGROUND layer, sized and inset like a normal square icon, with
+  -- the client's own circular tracking-border ring drawn as a separate,
+  -- larger OVERLAY texture on top of it -- the ring's artwork already
+  -- carries the round frame and shadow, so it (not a backdrop) is what
+  -- makes the button read as "a minimap button" instead of a bare icon.
+  local icon = instance:CreateTexture(nil, "BACKGROUND")
   icon:SetTexture("Interface\\Icons\\Spell_Nature_Lightning")
   icon:SetWidth(20)
   icon:SetHeight(20)
-  icon:SetPoint("CENTER", instance, "CENTER", 0, 0)
-  icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+  icon:SetPoint("TOPLEFT", instance, "TOPLEFT", 7, -5)
+  icon:SetTexCoord(0.05, 0.95, 0.05, 0.95)
+
+  local ring = instance:CreateTexture(nil, "OVERLAY")
+  ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+  ring:SetWidth(53)
+  ring:SetHeight(53)
+  ring:SetPoint("TOPLEFT", instance, "TOPLEFT")
 
   instance:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 

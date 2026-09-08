@@ -19,6 +19,7 @@ from suites import (
     boss_detection,
     combat,
     debuffs,
+    nampower,
     options,
     performance,
     presentation,
@@ -43,6 +44,7 @@ SUITES = [
     render_loop,
     boss_detection,
     options,
+    nampower,
 ]
 
 

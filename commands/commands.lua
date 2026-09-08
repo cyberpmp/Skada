@@ -57,7 +57,8 @@ registerSlashCommand({ name = "status", handler = function()
   local currentSegment = Skada.Data.current
   Skada:Print("Segment: " .. (Skada.Data.active and "active" or "idle") ..
     ", damage " .. Skada:FormatNumber(currentSegment.damage) ..
-    ", parser misses " .. tostring(Skada.Parser:GetMissCount()) .. ".")
+    ", parser misses " .. tostring(Skada.Parser:GetMissCount()) ..
+    ", source " .. Skada.Nampower:GetStatusText() .. ".")
 end })
 
 registerSlashCommand({ name = "help", handler = printHelp })

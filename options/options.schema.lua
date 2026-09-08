@@ -181,6 +181,18 @@ function Schema:BuildGeneralArgs()
       get = function() return Skada.combatLogging and true or false end,
       set = function(info, value) Skada:SetCombatLogging(value, true) end,
     },
+    useNampower = {
+      type = "toggle", order = 4.5,
+      name = "Use Nampower combat events",
+      desc = "Read damage, healing, power, misses, dispels and deaths from Nampower's server events instead of parsing combat chat text. Disabled automatically when Nampower is not loaded.",
+      disabled = function() return not Skada.Nampower.available end,
+      get = function() return Skada.db.profile.useNampower ~= false end,
+      set = function(info, value)
+        Skada.db.profile.useNampower = value and true or false
+        Skada.Nampower:ApplySetting()
+        Skada:MarkDirty()
+      end,
+    },
     minimap = {
       type = "toggle", order = 5,
       name = "Show minimap button",

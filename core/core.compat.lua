@@ -281,6 +281,58 @@ do
     end
     introsort(t, comp or ascending, 1, size, depth)
   end
+
+  -- table.concat was left alone above because it doesn't mutate anything --
+  -- but on this client it's built on the exact same side-tracked "n" as
+  -- getn/insert/remove/sort (real Lua 5.0's table library shares one
+  -- length fact across all of them), and every write above now happens
+  -- through this shim's own Lua-level assignments rather than the native
+  -- C insert/setn calls that side-tracked "n" is updated by. So a table
+  -- built via this file's table.insert (used throughout AceOO's Factory
+  -- for its class-identity uid: table.insert into a table, table.sort,
+  -- table.concat to stringify it) carries the right content and the right
+  -- table.getn answer, but the client's native table.concat still reads
+  -- an "n" that was never told about any of it -- confirmed in-game: it
+  -- silently concatenates as empty, which starved AceOO's uid string down
+  -- to "" for every mixin combination, so its Factory handed back
+  -- whichever class happened to be cached under that same empty key
+  -- instead of the right one (seen in game as SuperAPI's FuBarPlugin-based
+  -- minimap button silently missing methods and never showing). Wrap it so
+  -- it always reads the same length this shim already tracks correctly.
+  local realConcat = table.concat
+  table.concat = function(t, sep, i, j)
+    return realConcat(t, sep, i or 1, j or realgetn(t))
+  end
+
+  -- unpack(t) with no explicit end index has the identical exposure: real
+  -- Lua 5.1's unpack defaults its end index from the same native side-
+  -- tracked "n" table.concat did. string.split above (this file's own
+  -- code, bound globally as strsplit for other addons to call too) builds
+  -- its result via this file's table.insert and hands it to a bare
+  -- unpack(pieces) -- the same shape as the table.concat bug, just not yet
+  -- caught in the wild. Same fix.
+  local realUnpack = unpack
+  unpack = function(t, i, j)
+    return realUnpack(t, i or 1, j or realgetn(t))
+  end
+
+  -- table.foreachi(t, f) is the last member of the same Lua-5.0 table
+  -- family (insert/remove/getn/setn/concat/sort/foreachi all read or write
+  -- one shared side-tracked "n" in real Lua 5.0) and nothing else in this
+  -- file has touched it. Real Lua 5.1 dropped it outright, so only patch
+  -- it if this client still carries it for old-addon compatibility; unlike
+  -- concat/unpack it takes no i/j to hand it a bound, so it's replaced
+  -- outright rather than wrapped, same as insert/remove/sort above.
+  if table.foreachi then
+    table.foreachi = function(t, f)
+      local n = realgetn(t)
+      local i
+      for i = 1, n do
+        local result = f(i, t[i])
+        if result ~= nil then return result end
+      end
+    end
+  end
 end
 
 -- AceGUI's EditBox/MultiLineEditBox widgets (BigDebuffs' copy)

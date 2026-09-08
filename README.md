@@ -158,15 +158,31 @@ exercise raid combat processing. Host-side timing checks are available through
 
 ### Combat data
 
-Vanilla does not provide `COMBAT_LOG_EVENT_UNFILTERED`. Damage and healing are
-therefore parsed from localized `CHAT_MSG_COMBAT_*` text, then enriched with
-ClassicAPI unit, GUID, cast, aura, and creature information.
+Vanilla does not provide `COMBAT_LOG_EVENT_UNFILTERED`, so Skada reads combat
+from whichever of two sources the client offers.
+
+**Nampower events, when available.** With Nampower loaded and raw GUIDs accepted
+wherever a unit token is (the SuperWoW extension), Skada takes damage, healing,
+power gains, misses, dispels and deaths straight from the server's own combat
+packets: real GUIDs, real spell IDs, real amounts, no dropped chat lines and no
+locale gaps. The chat routes for exactly those facts are suppressed so nothing is
+counted twice. Interrupts, crowd control and aura uptime have no Nampower
+equivalent and stay on the text parser. Turn this off under Settings, General,
+"Use Nampower combat events". `docs/NAMPOWER.md` records the full mapping and
+what remains unused.
+
+**Localized combat text otherwise.** `CHAT_MSG_COMBAT_*` and `CHAT_MSG_SPELL_*`
+formats are compiled once and routed to the events each can occur on, then
+enriched with ClassicAPI unit, GUID, cast, aura, and creature information.
+`/skada status` prints which source is live.
 
 - Healing messages do not include overheal. Skada estimates effective healing
   from the target's readable health deficit at parse time. UI and combat-message
   updates can race, so effective healing and overhealing are always labelled as
   estimates. If health is unavailable, the full amount is retained as
-  unverified effective healing.
+  unverified effective healing. On the Nampower path the heal event carries the
+  target's GUID, so that unit's health is read directly and the estimate is
+  verified far more often.
 - A boss fight is recognized from the server-authored boss creature rank or an
   engaged BigWigs encounter module. Player and group-member targets are scanned;
   players, pets, and elite trash do not qualify solely by level or appearance.
@@ -176,7 +192,8 @@ ClassicAPI unit, GUID, cast, aura, and creature information.
 - Several avoidance and resource-gain messages use verified English patterns
   because matching client global-string names are unavailable. Other locales
   may under-count those specific facts; unmatched lines are ignored safely and
-  included in `/skada status`.
+  included in `/skada status`. This applies to the text parser only. The
+  Nampower events carry no text and are locale-independent.
 
 Skada stores compact aggregates rather than a full combat timeline. Chronicle
 serves the separate use case of retaining and analyzing `Logs/WoWCombatLog.txt`

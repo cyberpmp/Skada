@@ -94,7 +94,10 @@ function Data:RecordDamage(sourceName, targetName, amount, spellName, spellID, s
   return true
 end
 
-function Data:RecordHealing(sourceName, targetName, amount, spellName, spellID, critical, now)
+-- targetGUID is optional and only supplied by the Nampower ingest path. When
+-- present it lets EstimateHealing read the exact unit's health instead of
+-- guessing from a name, which removes the unverified-overheal cases.
+function Data:RecordHealing(sourceName, targetName, amount, spellName, spellID, critical, now, targetGUID)
   amount = tonumber(amount)
   if not amount or amount <= 0 then return end
   now = now or GetTime()
@@ -105,7 +108,7 @@ function Data:RecordHealing(sourceName, targetName, amount, spellName, spellID, 
   if not self:EnsureSegment(now, nil, false) then return end
   if petName then spellName = "[" .. petName .. "] " .. (spellName or "Heal") end
   local rawTargetName = trim(targetName)
-  local effective, overhealing, verified = self:EstimateHealing(rawTargetName, amount, now)
+  local effective, overhealing, verified = self:EstimateHealing(rawTargetName, amount, now, targetGUID)
 
   recordHealingSet(DataAggregator, self.current, actorName, identity, amount, effective, overhealing, verified, spellName, spellID, critical, now, rawTargetName)
   recordHealingSet(DataAggregator, self.total, actorName, identity, amount, effective, overhealing, verified, spellName, spellID, critical, now, rawTargetName)
@@ -114,8 +117,19 @@ function Data:RecordHealing(sourceName, targetName, amount, spellName, spellID, 
   return true
 end
 
-function Data:EstimateHealing(targetName, amount, now)
+function Data:EstimateHealing(targetName, amount, now, targetGUID)
   now = now or GetTime()
+
+  if targetGUID and UnitHealth and UnitHealthMax then
+    local health = tonumber(UnitHealth(targetGUID))
+    local maximum = tonumber(UnitHealthMax(targetGUID))
+    if health and maximum and maximum > 0 then
+      if targetName then self.healingMissByName[targetName] = nil end
+      local exact = min(amount, max(0, maximum - health))
+      return exact, amount - exact, true
+    end
+  end
+
   local missedAt = self.healingMissByName[targetName]
   if missedAt and now - missedAt < 0.5 then
     return amount, 0, false
@@ -140,7 +154,7 @@ function Data:EstimateHealing(targetName, amount, now)
     end
   end
 
-  if not missedAt or now - missedAt >= 0.5 then
+  if targetName and (not missedAt or now - missedAt >= 0.5) then
     self.healingMissByName[targetName] = now
   end
   return amount, 0, false

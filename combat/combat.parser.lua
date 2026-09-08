@@ -1,7 +1,19 @@
 local Skada = (_G or getfenv(0)).Skada
 
-local Parser = { routes = {}, unmatchedCountByEvent = {} }
+-- suppressedFacts gates the record helpers below. combat.nampower.lua sets the
+-- entries it takes over so the same hit is never counted from both the server
+-- packet and the localized chat line. Routes with no Nampower equivalent
+-- (interrupts, crowd control, aura removal) are never suppressed.
+local Parser = { routes = {}, unmatchedCountByEvent = {}, suppressedFacts = {} }
 Skada.Parser = Parser
+
+function Parser:SuppressFact(fact, suppressed)
+  self.suppressedFacts[fact] = suppressed and true or nil
+end
+
+function Parser:IsFactSuppressed(fact)
+  return self.suppressedFacts[fact] and true or false
+end
 
 local type = type
 local tonumber = tonumber
@@ -240,22 +252,28 @@ local function resolveSpellID(sourceName, spellName)
   return Skada.Tracking and Skada.Tracking:GetSpellID(sourceName, spellName) or nil
 end
 
+local suppressedFacts = Parser.suppressedFacts
+
 local function recordDamage(sourceName, spellName, targetName, amount, school, critical)
+  if suppressedFacts.damage then return end
   Skada.Data:RecordDamage(sourceName, targetName, amount, spellName, resolveSpellID(sourceName, spellName),
     school or "Physical", critical, GetTime(), mitigationType, mitigationAmount)
 end
 
 local function recordHealing(sourceName, spellName, targetName, amount, critical)
+  if suppressedFacts.healing then return end
   Skada.Data:RecordHealing(sourceName, targetName, amount, spellName,
     resolveSpellID(sourceName, spellName), critical, GetTime())
 end
 
 local function recordPower(recipientName, sourceName, amount, powerType, spellName)
+  if suppressedFacts.power then return end
   Skada.Data:RecordPower(recipientName, sourceName, amount, powerType, spellName,
     resolveSpellID(sourceName, spellName), GetTime())
 end
 
 local function recordAvoidance(sourceName, spellName, targetName, avoidanceType)
+  if suppressedFacts.avoidance then return end
   Skada.Data:RecordMiss(sourceName, targetName, spellName, avoidanceType, GetTime())
 end
 
@@ -530,17 +548,25 @@ Parser:AddPattern(interruptEvents, "%s interrupts %s's %s.", interruptOtherOther
 Parser:AddPattern(interruptEvents, "%s interrupts your %s.", interruptOtherSelf, false, "INTERRUPT_EN_OTHERSELF")
 
 local auraBreakEvents = { "CHAT_MSG_SPELL_BREAK_AURA" }
-local function auraRemovedOther(_, targetName, auraName) Skada.Tracking:RecordRawDispel(targetName, auraName, GetTime()) end
-local function auraRemovedSelf(_, auraName) Skada.Tracking:RecordRawDispel(getPlayerName(), auraName, GetTime()) end
+local function auraRemovedOther(_, targetName, auraName)
+  if suppressedFacts.dispel then return end
+  Skada.Tracking:RecordRawDispel(targetName, auraName, GetTime())
+end
+local function auraRemovedSelf(_, auraName)
+  if suppressedFacts.dispel then return end
+  Skada.Tracking:RecordRawDispel(getPlayerName(), auraName, GetTime())
+end
 Parser:AddPattern(auraBreakEvents, "%s's %s is removed.", auraRemovedOther, false, "AURA_REMOVED_EN_OTHER")
 Parser:AddPattern(auraBreakEvents, "Your %s is removed.", auraRemovedSelf, false, "AURA_REMOVED_EN_SELF")
 
 local deathEvents = { "CHAT_MSG_COMBAT_FRIENDLY_DEATH", "CHAT_MSG_COMBAT_HOSTILE_DEATH" }
 local function deathOther(_, targetName)
+  if suppressedFacts.death then return end
   local lastDamage = Skada.Tracking and Skada.Tracking:GetLastDamageInfo(targetName)
   Skada.Data:RecordDeath(targetName, GetTime(), lastDamage and lastDamage.sourceName, lastDamage and lastDamage.spellName)
 end
 local function deathSelf()
+  if suppressedFacts.death then return end
   local playerName = getPlayerName()
   local lastDamage = Skada.Tracking and Skada.Tracking:GetLastDamageInfo(playerName)
   Skada.Data:RecordDeath(playerName, GetTime(), lastDamage and lastDamage.sourceName, lastDamage and lastDamage.spellName)

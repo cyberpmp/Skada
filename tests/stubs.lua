@@ -52,18 +52,80 @@ function TestSetTarget(name, guid)
   units.target.name, units.target.guid = name, guid
 end
 
-function UnitExists(unit) return units[unit] ~= nil end
-function UnitName(unit) return units[unit] and units[unit].name end
+-- The OctoWoW client resolves a raw GUID string wherever a unit token is
+-- accepted (the SuperWoW extension Skada's Nampower ingest depends on), so the
+-- stub answers GUID lookups the same way the client does. Units that never sit
+-- on a token still resolve once registered here.
+local unitsByGUID = {}
+local function indexUnitsByGUID()
+  local token, value
+  for token, value in pairs(units) do
+    if value.guid then unitsByGUID[value.guid] = value end
+  end
+end
+indexUnitsByGUID()
+
+function TestRegisterGUIDUnit(guid, name, class, friend, health, maximum)
+  unitsByGUID[guid] = {
+    name = name, class = class or "WARRIOR", guid = guid,
+    friend = friend and true or false,
+    health = health or 1000, maxHealth = maximum or 1000,
+  }
+end
+
+local function resolveUnit(unit)
+  indexUnitsByGUID()
+  return units[unit] or unitsByGUID[unit]
+end
+
+function UnitExists(unit) return resolveUnit(unit) ~= nil end
+function UnitName(unit)
+  local value = resolveUnit(unit)
+  return value and value.name
+end
 function UnitClass(unit)
-  local value = units[unit]
+  local value = resolveUnit(unit)
   return value and value.class, value and value.class
 end
-function UnitGUID(unit) return units[unit] and units[unit].guid end
-function UnitHealth(unit) return units[unit] and units[unit].health or 0 end
-function UnitHealthMax(unit) return units[unit] and units[unit].maxHealth or 0 end
-function TestSetUnitHealth(unit, health, maximum)
-  units[unit].health, units[unit].maxHealth = health, maximum
+function UnitGUID(unit)
+  local value = resolveUnit(unit)
+  return value and value.guid
 end
+function UnitHealth(unit)
+  local value = resolveUnit(unit)
+  return value and value.health or 0
+end
+function UnitHealthMax(unit)
+  local value = resolveUnit(unit)
+  return value and value.maxHealth or 0
+end
+function TestSetUnitHealth(unit, health, maximum)
+  local value = resolveUnit(unit)
+  value.health, value.maxHealth = health, maximum
+end
+
+-- Nampower's Lua surface. Present by default so the ingest module activates
+-- under test; TestSetNampowerPresent(false) exercises the chat-text fallback.
+local nampowerPresent = true
+local spellNames = {
+  [116] = "Frostbolt", [133] = "Fireball", [2050] = "Lesser Heal",
+  [8092] = "Mind Blast", [5782] = "Fear", [527] = "Dispel Magic",
+}
+function TestSetNampowerPresent(value)
+  nampowerPresent = value and true or false
+  if nampowerPresent then
+    GetNampowerVersion = function() return "4.5.0" end
+    GetSpellNameAndRankForId = function(spellID) return spellNames[spellID], "Rank 1" end
+  else
+    GetNampowerVersion = nil
+    GetSpellNameAndRankForId = nil
+  end
+end
+TestSetNampowerPresent(true)
+
+TestLastCVars = {}
+function SetCVar(name, value) TestLastCVars[name] = value end
+function GetCVar(name) return TestLastCVars[name] end
 function UnitIsFriend(_, unit) return units[unit] and units[unit].friend end
 function UnitIsPlayer(unit) return unit == "player" or unit == "party1" end
 function UnitIsDead() return false end

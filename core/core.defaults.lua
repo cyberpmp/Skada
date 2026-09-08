@@ -17,6 +17,7 @@ Defaults.schema = {
     segment = "current",
     mergePets = true,
     trackAll = false,
+    useNampower = true,
     maxSegments = 10,
     onlyBossFights = false,
     autoLog = false,

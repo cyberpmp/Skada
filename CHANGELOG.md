@@ -2,6 +2,59 @@
 
 All notable changes to the PMP Skada rewrite are documented here.
 
+## Unreleased
+
+## 2.0.2 - 2026-09-08
+
+### Added
+
+- Read combat from Nampower's server events instead of localized chat text when
+  Nampower and GUID-addressable unit tokens are both available. Damage, healing,
+  power gains, misses and avoidance, dispels and deaths now arrive with real
+  GUIDs, real spell IDs and real amounts, with no dropped chat lines and no
+  locale-specific patterns. The matching chat routes are suppressed while the
+  ingest is active, so nothing is counted twice, and interrupts, crowd control
+  and aura uptime keep flowing from the text parser, which has no Nampower
+  equivalent. New "Use Nampower combat events" setting under General; `/skada
+  status` names the live source.
+- Off-hand auto attacks are recorded separately from main-hand swings, which
+  combat text cannot express.
+- Environmental damage and damage shields are attributed by GUID.
+- `docs/NAMPOWER.md`: a full audit of Nampower's event and Lua surface, what
+  Skada consumes, what stays on the parser, and what is available but unused.
+
+### Changed
+
+- Overhealing is computed from the healed unit's own GUID on the Nampower path,
+  so heals on units that hold no unit token are verified instead of assumed
+  fully effective.
+
+### Fixed
+
+- `table.concat`, `unpack`, and `table.foreachi` now read the same length the
+  rest of the global compatibility shim already tracks correctly, instead of
+  the client's native side-tracked length, which nothing after `table.insert`
+  keeps in sync any more. Any table built with the shimmed `table.insert` and
+  then handed to one of these came out silently truncated (usually to
+  nothing). This broke AceOO's mixin/class identity system used by SuperAPI,
+  Nampower's own settings icon, and other Ace2-based addons loaded after
+  Skada: their per-class-combination ID string collapsed to `""` for every
+  combination, so AceOO's class cache handed back whichever class had been
+  cached first instead of the right one -- symptom in the wild: SuperAPI's
+  FuBarPlugin-based minimap icon silently missing methods and never showing.
+  `string.split`/`strsplit` (bound globally for other addons to call, see
+  `core/core.compat.lua`) was itself calling the affected `unpack`.
+- The minimap button now uses the same construction every other minimap
+  button on this client does (SuperAPI's FuBarPlugin-based icon included):
+  the lightning-bolt icon on its own layer with the client's circular
+  tracking-border ring drawn as a larger texture on top, instead of a
+  backdrop-drawn edge. An earlier same-day fix pushed the button's radius
+  out from the conventional 78px to dodge a collision with other addons'
+  icons; that turned out to not be a real risk (the actual cause was the
+  `table.concat`/`unpack`/`table.foreachi` bug above) and only left a
+  visible gap between the button and the minimap, so the radius is back to
+  78px, flush with the ring like every other minimap button.
+
 ## 2.0.1 - 2026-09-07
 
 ### Changed
