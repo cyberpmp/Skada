@@ -29,7 +29,6 @@ The following assets come from
 | `media/FlatBar.tga` | `pfUI/img/bar.tga` | None |
 | `media/classicons.tga` | Same path/name | None |
 | `media/glow2.tga` | Same path/name | None |
-| `media/Expressway.ttf` | Same path/name | None |
 | `media/bar_elvui.tga` | `pfUI/img/bar_elvui.tga` | Resized from 256x32 to 32x32 |
 | `media/bar_gradient.tga` | `pfUI/img/bar_gradient.tga` | Resized from 256x32 to 32x32 |
 | `media/bar_striped.tga` | `pfUI/img/bar_striped.tga` | Resized from 256x32 to 32x32 |

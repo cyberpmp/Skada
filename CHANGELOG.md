@@ -4,6 +4,18 @@ All notable changes to the PMP Skada rewrite are documented here.
 
 ## Unreleased
 
+### Changed
+
+- The README now carries a non-affiliation and trademark disclaimer and states
+  that no game client files are redistributed.
+
+### Removed
+
+- The bundled Expressway font. Its freeware terms do not clearly permit
+  redistributing the font file, so it is no longer shipped or offered in the
+  font list. Saved settings that referenced it fall back to the client's
+  default font rendering.
+
 ## 2.0.2 - 2026-09-08
 
 ### Added

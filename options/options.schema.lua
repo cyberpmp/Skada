@@ -11,7 +11,6 @@ local table_insert = table.insert
 
 Schema.fontChoices = {
   { value = "Interface\\AddOns\\Skada\\media\\Accidental Presidency.ttf", label = "Accidental Presidency" },
-  { value = "Interface\\AddOns\\Skada\\media\\Expressway.ttf", label = "Expressway" },
   { value = "Fonts\\FRIZQT__.TTF", label = "Friz Quadrata" },
   { value = "Fonts\\ARIALN.TTF", label = "Arial Narrow" },
   { value = "Fonts\\MORPHEUS.ttf", label = "Morpheus" },

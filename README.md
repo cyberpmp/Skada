@@ -277,3 +277,10 @@ The project-authored addon code is Copyright (c) 2026 cyberpmp (PMP) and is
 distributed under the [MIT License](LICENSE). Bundled fonts and textures retain
 their upstream copyrights and licenses; see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Skada is an independent, non-commercial fan project. It is not affiliated
+with, endorsed by, or sponsored by Blizzard Entertainment, Inc. World of
+Warcraft and Warcraft are trademarks or registered trademarks of Blizzard
+Entertainment, Inc. No game client files, art, fonts, or sounds are
+redistributed with this project; it only references client resources by path
+at runtime.
