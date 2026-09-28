@@ -38,6 +38,7 @@ Data.EnsureSegment = DataSegments.EnsureSegment
 Data.GetSetDuration = DataSegments.GetSetDuration
 Data.EachLiveSet = DataSegments.EachLiveSet
 Data.IsGroupInCombat = DataSegments.IsGroupInCombat
+Data.GroupInCombat = DataSegments.GroupInCombat
 Data.OnCombatEnter = DataSegments.OnCombatEnter
 Data.OnCombatLeave = DataSegments.OnCombatLeave
 Data.EndSegment = DataSegments.EndSegment
@@ -68,7 +69,10 @@ function Data:Initialize()
   self:RebuildRoster()
 end
 
-function Data:RecordDamage(sourceName, targetName, amount, spellName, spellID, school, critical, now, mitigationType, mitigationAmount)
+-- targetGUID is optional and only supplied by the Nampower ingest path. It
+-- rides along on damageRecorded so the threat estimator can key the hit to
+-- the exact mob instead of guessing between same-named ones.
+function Data:RecordDamage(sourceName, targetName, amount, spellName, spellID, school, critical, now, mitigationType, mitigationAmount, targetGUID)
   amount = tonumber(amount) or 0
   local hasMitigation = mitigationType and mitigationAmount and mitigationAmount > 0
   if amount <= 0 and not hasMitigation then return end
@@ -87,7 +91,7 @@ function Data:RecordDamage(sourceName, targetName, amount, spellName, spellID, s
   recordDamageSet(DataAggregator, self.current, actorName, sourceIdentity, targetActorName, targetIdentity, amount, spellName, spellID, critical, selfDamage, now, rawTargetName, mitigationType, mitigationAmount)
   recordDamageSet(DataAggregator, self.total, actorName, sourceIdentity, targetActorName, targetIdentity, amount, spellName, spellID, critical, selfDamage, now, rawTargetName, mitigationType, mitigationAmount)
   if actorName and not selfDamage and not targetActorName and rawTargetName then
-    Skada:Publish("damageRecorded", actorName, sourceIdentity, rawTargetName, amount, spellName, spellID, now)
+    Skada:Publish("damageRecorded", actorName, sourceIdentity, rawTargetName, amount, spellName, spellID, now, targetGUID)
   end
   if Skada.Tracking then Skada.Tracking:NoteDamage(sourceName, targetName, spellName, now) end
   Skada:MarkDirty()
@@ -246,9 +250,11 @@ function Data:RecordBuffDuration(sourceName, spellName, spellID, duration)
   self:RecordDuration("buffUptime", "buffSpells", sourceName, spellName, duration)
 end
 
-function Data:RecordDeath(targetName, now, killerName, killerSpell)
+-- targetGUID is optional and only supplied by the Nampower ingest path; it
+-- lets the threat estimator drop exactly the mob that fell.
+function Data:RecordDeath(targetName, now, killerName, killerSpell, targetGUID)
   now = now or GetTime()
-  Skada:Publish("unitDied", trim(targetName))
+  Skada:Publish("unitDied", trim(targetName), targetGUID)
   local actorName, identity = self:ResolveTarget(targetName)
   if not actorName then return end
   if not self:EnsureSegment(now, nil, false) then return end

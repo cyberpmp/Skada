@@ -78,12 +78,14 @@ function Skada:Subscribe(name, callback)
   table_insert(list, callback)
 end
 
-function Skada:Publish(name, payload1, payload2, payload3, payload4, payload5, payload6, payload7)
+-- Chunks get no varargs, so the payload is fixed-width. damageRecorded is
+-- the widest publisher at eight values; widen this before adding a ninth.
+function Skada:Publish(name, payload1, payload2, payload3, payload4, payload5, payload6, payload7, payload8)
   local list = self.subscribers[name]
   if not list then return end
   local subscriberIndex, ok, message
   for subscriberIndex = 1, table_getn(list) do
-    ok, message = pcall(list[subscriberIndex], payload1, payload2, payload3, payload4, payload5, payload6, payload7)
+    ok, message = pcall(list[subscriberIndex], payload1, payload2, payload3, payload4, payload5, payload6, payload7, payload8)
     if not ok then
       Skada:Print("Subscriber failed (" .. name .. "): " .. tostring(message))
     end

@@ -198,9 +198,11 @@ def run(ctx: Context):
       estimator:RecordDamage("Alice", aliceIdentity, "Twin Enemy", 10, "Fireball", 133, 107)
       TestSetTarget("Twin Enemy", "0xNEW")
       estimator:ObserveCurrentEnemy(107)
-      assert(not estimator.threatByEnemyKey["0xOLD"] and not estimator.enemyByKey["0xOLD"])
+      -- The first twin keeps its table; only the name mapping moves.
+      assert(estimator.threatByEnemyKey["0xOLD"] and estimator.enemyByKey["0xOLD"],
+        "retargeting a same-named mob dropped the first mob's threat table")
       assert(estimator.enemyKeyByName["Twin Enemy"] == "0xNEW")
-      assert(estimator.enemyCount == 1,
+      assert(estimator.enemyCount == 2,
         "fallback threat enemy count drifted while promoting a name to a GUID")
       TestSetTarget("Wolf", "0xE")
 
@@ -218,6 +220,12 @@ def run(ctx: Context):
       Skada.Threat:TargetChanged()
       TestSetTime(110)
       estimator:RecordDamage("Alice", aliceIdentity, "Boar", 100, "Fireball", 133, 110)
+      -- Solo players never get a server reply, so the estimate must paint
+      -- on the very first tick after a target switch instead of after a
+      -- wait for data that cannot arrive.
+      Skada.Threat:Update(GetTime())
+      assert(Skada.Threat.usingEstimate and Skada.Threat.rowsByName.Alice,
+        "solo threat estimate was held back after a target switch")
       estimator:RecordDamage("Bob", bobIdentity, "Boar", 100, "Fireball", 133, 110)
       estimator:RecordDamage("Wolf", wolfIdentity, "Boar", 50, "Bite", 1, 110)
       Skada.Threat:Update(GetTime())
@@ -248,6 +256,124 @@ def run(ctx: Context):
       local soloRows, soloCount = estimator:Build("Boar", "0xC", {})
       assert(soloCount == 1 and soloRows[1].name == "Alice",
         "leaving a group mid-combat kept a former groupmate's estimated threat")
+
+      -- Two mobs sharing a name: damage lands on the one currently targeted,
+      -- and switching between them keeps both threat tables.
+      estimator:Reset()
+      Skada.Threat:ClearRows(true)
+      TestSetTarget("Boar", "0xC")
+      Skada.Threat:TargetChanged()
+      TestSetTime(113)
+      estimator:RecordDamage("Alice", aliceIdentity, "Boar", 300, "Fireball", 133, 113)
+      TestSetTarget("Boar", "0xD")
+      Skada.Threat:TargetChanged()
+      -- PLAYER_TARGET_CHANGED refreshes the probe cache; the direct test
+      -- flow raises no events, so the refresh is called where the event
+      -- would fire.
+      estimator:ProbeTargetToken()
+      estimator:RecordDamage("Alice", aliceIdentity, "Boar", 100, "Fireball", 133, 113)
+      local secondRows, secondCount = estimator:Build("Boar", "0xD", {})
+      assert(secondCount == 1 and secondRows[1].threat == 100,
+        "damage on the second same-named mob did not land on the targeted mob")
+      TestSetTarget("Boar", "0xC")
+      Skada.Threat:TargetChanged()
+      estimator:ProbeTargetToken()
+      TestSetTime(114)
+      Skada.Threat:Update(GetTime())
+      assert(Skada.Threat.rowsByName.Alice and Skada.Threat.rowsByName.Alice.threat == 300,
+        "targeting a same-named mob erased the first mob's threat table")
+      -- A name-only death line ("Boar dies.") must take the other Boar, not
+      -- the live target being fought, so its threat carries on.
+      estimator:RemoveEnemy("Boar")
+      assert(estimator.threatByEnemyKey["0xC"] and not estimator.threatByEnemyKey["0xD"],
+        "a same-named death removed the live target instead of the fallen mob")
+      estimator:RecordDamage("Alice", aliceIdentity, "Boar", 100, "Fireball", 133, 114)
+      Skada.Threat:Update(GetTime())
+      assert(Skada.Threat.rowsByName.Alice.threat == 400,
+        "threat did not carry on after the other same-named mob died")
+      -- When the target itself is the one that died, only its table goes:
+      -- the other same-named mob keeps the threat built on it.
+      TestSetTarget("Boar", "0xD")
+      Skada.Threat:TargetChanged()
+      estimator:ProbeTargetToken()
+      estimator:RecordDamage("Alice", aliceIdentity, "Boar", 100, "Fireball", 133, 114)
+      assert(estimator.threatByEnemyKey["0xD"] and estimator.threatByEnemyKey["0xC"])
+      local savedUnitIsDead = UnitIsDead
+      UnitIsDead = function(unit) return unit == "target" end
+      estimator:RemoveEnemy("Boar")
+      UnitIsDead = savedUnitIsDead
+      assert(not estimator.threatByEnemyKey["0xD"],
+        "a dead target's threat table survived its death line")
+      assert(estimator.threatByEnemyKey["0xC"] and estimator.threatByEnemyKey["0xC"].Alice.threat == 400,
+        "killing one same-named mob wiped the threat built on the other")
+      TestSetTarget("Boar", "0xC")
+      Skada.Threat:TargetChanged()
+      Skada.Threat:Update(GetTime())
+      assert(Skada.Threat.rowsByName.Alice and Skada.Threat.rowsByName.Alice.threat == 400,
+        "the surviving same-named mob did not show its earlier threat")
+
+      -- The live-target rule is the player's own heuristic: a groupmate's
+      -- damage line names whatever mob it names and must not repoint the
+      -- name at the mob the player happens to target.
+      estimator:Reset()
+      Skada.Threat:ClearRows(true)
+      TestSetTarget("Boar", "0xC")
+      estimator:ProbeTargetToken()
+      TestSetTime(115)
+      estimator:RecordDamage("Alice", aliceIdentity, "Boar", 100, "Fireball", 133, 115)
+      assert(estimator.enemyKeyByName["Boar"] == "0xC")
+      TestSetTarget("Boar", "0xD")
+      estimator:ProbeTargetToken()
+      estimator:RecordDamage("Bob", bobIdentity, "Boar", 100, "Fireball", 133, 115)
+      assert(estimator.enemyKeyByName["Boar"] == "0xC",
+        "a groupmate's damage line repointed the name at the player's target")
+      assert(estimator.threatByEnemyKey["0xD"] == nil,
+        "a groupmate's damage line credited the player's targeted mob")
+      assert(estimator.threatByEnemyKey["0xC"] and estimator.threatByEnemyKey["0xC"].Bob.threat == 100,
+        "a groupmate's damage line did not land on the mob the name mapped to")
+
+      -- An untracked corpse parked on the target stops the removal where it
+      -- stands: the survivor sweep must not take a live twin's table.
+      estimator:Reset()
+      Skada.Threat:ClearRows(true)
+      TestSetTarget("Boar", "0xC")
+      estimator:ProbeTargetToken()
+      TestSetTime(116)
+      estimator:RecordDamage("Alice", aliceIdentity, "Boar", 100, "Fireball", 133, 116)
+      assert(estimator.threatByEnemyKey["0xC"])
+      local savedUnitIsDeadForCorpse = UnitIsDead
+      UnitIsDead = function(unit) return unit == "target" end
+      TestSetTarget("Boar", "0xDEAD")
+      estimator:ProbeTargetToken()
+      estimator:RemoveEnemy("Boar")
+      UnitIsDead = savedUnitIsDeadForCorpse
+      assert(estimator.threatByEnemyKey["0xC"],
+        "an untracked corpse on the target swept a live twin's table away")
+      assert(estimator.enemyKeyByName["Boar"] == "0xC",
+        "an untracked corpse on the target dropped the live twin's name mapping")
+
+      -- Idle expiry drops the table and the name mapping with the record, so
+      -- a stale mapping cannot re-register the mob on a later hit.
+      estimator:Reset()
+      Skada.Threat:ClearRows(true)
+      TestSetTarget("Boar", "0xC")
+      estimator:ProbeTargetToken()
+      TestSetTime(200)
+      estimator:RecordDamage("Alice", aliceIdentity, "Idle Mob", 50, "Fireball", 133, 200)
+      assert(estimator.enemyKeyByName["Idle Mob"] ~= nil)
+      TestSetTime(240)
+      estimator:RecordHealing("Bob", bobIdentity, 10, 240)
+      assert(estimator.threatByEnemyKey[estimator.enemyKeyByName["Idle Mob"]] == nil,
+        "an expired mob's threat table outlived its record")
+      assert(estimator.enemyKeyByName["Idle Mob"] == nil,
+        "an expired mob's name mapping outlived its record")
+      TestSetTime(241)
+      estimator:RecordDamage("Alice", aliceIdentity, "Idle Mob", 25, "Fireball", 133, 241)
+      local idleKey = estimator.enemyKeyByName["Idle Mob"]
+      assert(idleKey ~= nil)
+      local idleThreat = estimator.threatByEnemyKey[idleKey]
+      assert(idleThreat and idleThreat.Alice.threat == 25,
+        "an expired mob's stale mapping re-registered it on the next hit")
 
       TestSetPartyMembers(1)
       Skada.Data:RebuildRoster()

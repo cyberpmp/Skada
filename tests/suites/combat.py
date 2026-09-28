@@ -219,3 +219,61 @@ def run(ctx: Context):
         Skada.Data.groupTokens[2] == "pet" and
         Skada.Data.groupTokens[3] == "party1", "roster refill lost group tokens")
     ''')
+    ctx.run('''
+      -- The 1.12 client prints a blank name for a caster it cannot see, so
+      -- a stranger's summon reads "'s Inferno Effect hits Boar for 255.".
+      -- That is not the player, and the empty name must not fall back to it.
+      local alice = Skada.Data.current.actors.Alice
+      local damageBefore = alice.damage
+      Skada.Parser:OnCombatMessage("CHAT_MSG_SPELL_CREATURE_VS_CREATURE_DAMAGE",
+        "'s Inferno Effect hits Boar for 255.")
+      Skada.Parser:OnCombatMessage("CHAT_MSG_SPELL_CREATURE_VS_CREATURE_DAMAGE",
+        "'s Inferno Effect hits Boar for 255 Fire damage.")
+      assert(alice.damage == damageBefore,
+        "a blank caster name was credited to the player")
+      assert(alice.damageSpells["Inferno Effect"] == nil,
+        "a blank caster's spell was added to the player's spell list")
+      -- The empty capture must not leak further either: no blank segment
+      -- name, and no "Killed by  (Inferno Effect)" recap for the target.
+      Skada.Parser:OnCombatMessage("CHAT_MSG_SPELL_CREATURE_VS_CREATURE_DAMAGE",
+        "'s Inferno Effect was resisted by Boar.")
+      assert(Skada.Data.current.name ~= "", "a blank caster name became the segment name")
+      local lastHit = Skada.Tracking:GetLastDamageInfo("Boar")
+      assert(not lastHit or lastHit.sourceName ~= "",
+        "a blank caster name was noted as the last damage source")
+      -- A blank-caster hit on a tracked target is the one case where the
+      -- death recap could lose the spell: the witness keeps the blank source
+      -- beside it, and the recap keeps the spell instead of collapsing to a
+      -- bare "Unknown cause". The recap is written into a throwaway set so
+      -- the fight data later suites read stays untouched.
+      Skada.Tracking:NoteDamage(nil, "Alice", "Inferno Effect", GetTime())
+      local trackedHit = Skada.Tracking:GetLastDamageInfo("Alice")
+      assert(trackedHit and trackedHit.sourceName == nil and trackedHit.spellName == "Inferno Effect",
+        "a blank-caster hit on a tracked target lost its spell")
+      local recapSet = Skada.DataAggregator:NewSet("Recap Probe", GetTime(), false)
+      Skada.DataAggregator:RecordDeathSet(recapSet, "Alice", Skada.Data:GetIdentityByName("Alice"),
+        GetTime(), nil, "Inferno Effect")
+      assert(recapSet.actors.Alice.deathLog.death1.customText == "Unknown cause (Inferno Effect)",
+        "a killer the client could not name lost its spell from the death recap")
+    ''')
+    ctx.run('''
+      -- /skada reset wipes everything on the spot; it never raises the
+      -- confirmation popup the button and reset policies use.
+      -- Later suites read this fight data, so the segments are put back.
+      local data = Skada.Data
+      local savedCurrent, savedTotal, savedActive = data.current, data.total, data.active
+      local savedHistory = {}
+      local historyIndex
+      for historyIndex = 1, table.getn(data.history) do savedHistory[historyIndex] = data.history[historyIndex] end
+      assert(savedCurrent.damage > 0, "reset test needs recorded damage")
+      local popupShown = false
+      local savedShow = StaticPopup_Show
+      StaticPopup_Show = function() popupShown = true end
+      SlashCmdList.SKADA("reset")
+      StaticPopup_Show = savedShow
+      assert(not popupShown, "/skada reset asked for confirmation")
+      assert(data.current.damage == 0 and table.getn(data.history) == 0,
+        "/skada reset left fight data behind")
+      data.current, data.total, data.active = savedCurrent, savedTotal, savedActive
+      for historyIndex = 1, table.getn(savedHistory) do data.history[historyIndex] = savedHistory[historyIndex] end
+    ''')

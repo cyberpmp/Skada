@@ -413,6 +413,8 @@ OpacitySliderFrame = CreateFrame("Slider", "OpacitySliderFrame", ColorPickerFram
 
 COMBATHITSELFOTHER = "You hit %s for %d."
 COMBATHITOTHEROTHER = "%s hits %s for %d."
+SPELLLOGOTHEROTHER = "%s's %s hits %s for %d."
+SPELLLOGSCHOOLOTHEROTHER = "%s's %s hits %s for %d %s damage."
 SPELLLOGSCHOOLSELFOTHER = "Your %s hits %s for %d %s damage."
 SPELLLOGCRITSCHOOLSELFOTHER = "Your %s crits %s for %d %s damage."
 HEALEDSELFOTHER = "Your %s heals %s for %d."

@@ -134,7 +134,7 @@ def run(ctx: Context):
         windows = {},
       }
       Skada.WindowConfig.Migrate(bordered)
-      assert(bordered.visualVersion == 5 and bordered.windowBorderStyle == "solid",
+      assert(bordered.visualVersion == 6 and bordered.windowBorderStyle == "solid",
         "existing bordered profile kept the default grey glow")
       assert(bordered.updateRate == nil and bordered.smoothBars == nil and bordered.barSpeed == nil,
         "obsolete refresh and animation settings survived migration")
@@ -146,18 +146,34 @@ def run(ctx: Context):
         windows = {},
       }
       Skada.WindowConfig.Migrate(borderless)
-      assert(borderless.visualVersion == 5 and borderless.windowBorderStyle == "none",
+      assert(borderless.visualVersion == 6 and borderless.windowBorderStyle == "none",
         "border migration changed an existing borderless profile")
+
+      -- Docked (bottom-left anchored) windows keep their pixel height across
+      -- the trailing-spacing change; free-floating windows keep their rows.
+      local docked = {
+        visualVersion = 5,
+        windows = {
+          { point = "BOTTOMLEFT", rows = 10, barHeight = 18, barSpacing = 2 },
+          { point = "CENTER", rows = 10, barHeight = 18, barSpacing = 2 },
+        },
+      }
+      Skada.WindowConfig.Migrate(docked)
+      local Style = Skada.UIStyle
+      assert(math.abs(Style:GetWindowHeight(docked.windows[1], docked.windows[1].rows)
+        - (Style.HEADER_HEIGHT + 10 * 20 + Style.FOOTER_HEIGHT)) < 0.01,
+        "a docked window changed height on upgrade")
+      assert(docked.windows[2].rows == 10, "a floating window's row count was migrated")
 
       local profile = Skada.db.profile
       local primary = Skada.UI:GetPrimary()
       local oldStyle, oldWindowVersion = profile.windowBorderStyle,
         primary.db.visualVersion
-      profile.visualVersion = 5
+      profile.visualVersion = 6
       profile.windowBorderStyle = "shadow"
       primary.db.visualVersion = 4
       Skada.WindowConfig.SyncLegacy(Skada.UI, primary)
-      assert(profile.visualVersion == 5,
+      assert(profile.visualVersion == 6,
         "primary-window sync downgraded the profile migration version")
       Skada.WindowConfig.Migrate(profile)
       assert(profile.windowBorderStyle == "shadow",
@@ -212,7 +228,7 @@ def run(ctx: Context):
       local meter = Skada.UI:GetPrimary()
       local Style = Skada.UIStyle
       local rowStep = meter.db.barHeight + meter.db.barSpacing
-      local fullHeight = Style.HEADER_HEIGHT + meter.db.rows * rowStep + Style.FOOTER_HEIGHT
+      local fullHeight = Style.HEADER_HEIGHT + meter.db.rows * rowStep - meter.db.barSpacing + Style.FOOTER_HEIGHT
       assert(meter.frame.height == fullHeight, "window height does not include the header")
       assert(meter.frame.frameType == "Button" and meter.header:IsShown(),
         "meter background must receive clicks while the title bar is shown")
@@ -221,11 +237,12 @@ def run(ctx: Context):
 
       meter.db.hideTitle, meter.layoutDirty = true, true
       meter:Refresh()
-      local collapsedHeight = meter.db.rows * rowStep + Style.FOOTER_HEIGHT
+      local collapsedHeight = Style.HEADLESS_TOP_INSET + meter.db.rows * rowStep - meter.db.barSpacing + Style.FOOTER_HEIGHT
       assert(not meter.header:IsShown(), "hide-title did not hide the header")
       assert(meter.frame.height == collapsedHeight,
         "hide-title did not drop the header from the window height")
-      assert(meter.rows[1].lastPointY == 0, "row 1 was not re-anchored to the window top")
+      assert(meter.rows[1].lastPointY == -Style.HEADLESS_TOP_INSET,
+        "row 1 was not re-anchored just below the window top")
       -- Hidden title bars expose no menu or automatic-segment control, while
       -- the window background still handles navigation on an empty meter.
       local menu = meter.actionMenu
@@ -301,7 +318,7 @@ def run(ctx: Context):
       local Style = Skada.UIStyle
       local resizeFrame = {
         GetWidth = function() return 240 end,
-        GetHeight = function() return Style.HEADER_HEIGHT + Style.FOOTER_HEIGHT + 10 * 11 end,
+        GetHeight = function() return Style.HEADER_HEIGHT + Style.FOOTER_HEIGHT + 10 * 11 - 1 end,
       }
       local resizeWindow = {
         frame = resizeFrame,
@@ -329,8 +346,9 @@ def run(ctx: Context):
         manager = { SyncLegacy = function() end },
       }
       Skada.UISnapDock.PersistGeometry(gridWindow, false)
-      local expectedHeight = gridWindow.db.rows * (gridWindow.db.barHeight + gridWindow.db.barSpacing)
-        + Style.FOOTER_HEIGHT
+      local expectedHeight = Style.HEADLESS_TOP_INSET
+        + gridWindow.db.rows * (gridWindow.db.barHeight + gridWindow.db.barSpacing)
+        - gridWindow.db.barSpacing + Style.FOOTER_HEIGHT
       assert(math.abs(expectedHeight - 219.5) < 0.01,
         "persisted rows no longer reproduce the copied height: " ..
         tostring(expectedHeight) .. " vs 219.5")
@@ -350,7 +368,7 @@ def run(ctx: Context):
       meter.db.rows = 6.4
       meter.layoutDirty = true
       meter:Refresh()
-      assert(meter.frame.height == Style.HEADER_HEIGHT + meter.db.rows * rowStep + Style.FOOTER_HEIGHT,
+      assert(meter.frame.height == Style.HEADER_HEIGHT + meter.db.rows * rowStep - meter.db.barSpacing + Style.FOOTER_HEIGHT,
         "frame did not keep the snap-copied fractional height")
       assert(meter.rows[6].height == meter.db.barHeight, "row 6 is not a full bar")
       assert(meter.rows[7].height == (meter.db.rows - 6) * rowStep - meter.db.barSpacing,

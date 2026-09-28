@@ -54,9 +54,9 @@ local function paintExtra(row, entry, rowWidth, maximum)
   end
 end
 
-local function getPartialRowHeight(profile, rowStep)
+local function getPartialRowHeight(profile)
   local rows = tonumber(profile.rows) or 0
-  local strip = (rows - floor(rows)) * rowStep - profile.barSpacing
+  local strip = Style:GetContentHeight(profile, rows - floor(rows))
   if strip + 0.000001 >= 6 then return strip end
   return 0
 end
@@ -178,17 +178,17 @@ function Renderer:ApplyLayout()
   local profile = self.db
   local visibleRows = getVisibleRowCount(profile)
   profile.width = max(Style.MIN_WINDOW_WIDTH, profile.width or Style.MIN_WINDOW_WIDTH)
-  local rowStep = profile.barHeight + profile.barSpacing
-  local headerHeight = profile.hideTitle and 0 or Style.HEADER_HEIGHT
-  local height = headerHeight + profile.rows * rowStep + Style.FOOTER_HEIGHT
+  local rowStep = Style:GetRowStep(profile)
+  local headerHeight = Style:GetHeaderHeight(profile)
+  local height = Style:GetWindowHeight(profile, profile.rows)
   self.frame:SetWidth(profile.width)
   self.frame:SetHeight(height)
   self.frame:ClearAllPoints()
   self.frame:SetPoint(profile.point, UIParent, profile.relativePoint, profile.x, profile.y)
   self.frame:SetMovable(not profile.locked)
   self.frame:SetResizable(not profile.locked)
-  self.frame:SetMinResize(Style.MIN_WINDOW_WIDTH, headerHeight + 3 * rowStep + Style.FOOTER_HEIGHT)
-  self.frame:SetMaxResize(600, headerHeight + 30 * rowStep + Style.FOOTER_HEIGHT)
+  self.frame:SetMinResize(Style.MIN_WINDOW_WIDTH, Style:GetWindowHeight(profile, Style.MIN_ROWS))
+  self.frame:SetMaxResize(600, Style:GetWindowHeight(profile, Style.MAX_ROWS))
   self.frame:EnableMouse(true)
   self.frame:SetClampedToScreen(true)
 
@@ -197,7 +197,7 @@ function Renderer:ApplyLayout()
   else
     self.header:Show()
   end
-  local partialHeight = getPartialRowHeight(profile, rowStep)
+  local partialHeight = getPartialRowHeight(profile)
   self:EnsureRows(visibleRows + (partialHeight > 0 and 1 or 0))
   local rowIndex, row, buttonIndex
   for rowIndex = 1, table_getn(self.rows) do
@@ -243,7 +243,7 @@ function Renderer:PaintRows()
   local profile = self.db
   local count = self.displayCount or 0
   local visibleRows = getVisibleRowCount(profile)
-  local partialHeight = getPartialRowHeight(profile, profile.barHeight + profile.barSpacing)
+  local partialHeight = getPartialRowHeight(profile)
   local paintRows = visibleRows + (partialHeight > 0 and 1 or 0)
   paintRows = min(paintRows, table_getn(self.rows))
   local maxOffset = max(0, count - visibleRows)

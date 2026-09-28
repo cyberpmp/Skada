@@ -10,6 +10,7 @@ local Threat = {
   missingGrace = 1.25,
   staleAfter = 2.5,
   estimateGrace = 2.0,
+  serverHold = 0.75,
   requestLimit = 10,
 
   windowEnumerator = nil,
@@ -60,12 +61,10 @@ function Threat:GetChannel()
 end
 
 function Threat:GetTargetName(requireCombat)
-  if not UnitExists or not UnitExists("target") then return nil end
-  if UnitIsDead and UnitIsDead("target") then return nil end
-  if UnitIsPlayer and UnitIsPlayer("target") then return nil end
-  if UnitCanAttack and not UnitCanAttack("player", "target") then return nil end
+  local estimator = Skada.ThreatEstimate
+  if not estimator or not estimator:IsLiveEnemyUnit("target") then return nil end
   if requireCombat and UnitAffectingCombat and not UnitAffectingCombat("player") then return nil end
-  local name = UnitName("target")
+  local name = UnitName and UnitName("target")
   if not name or name == "" then return nil end
   return name
 end
@@ -90,14 +89,8 @@ function Threat:TargetChanged()
   if targetKey ~= self.targetKey then
     self.targetName = targetName
     self.targetKey = targetKey
-    self.requestTarget = nil
-    self.nextQuery = 0
-    self.lastResponse = nil
-    self.lastServerResponse = nil
-    self.serverWaitSince = now
-    self.usingEstimate = false
+    self:ResetTargetState(now)
     self.burstUntil = now + self.burstDuration
-    self:ClearRows(true)
   elseif not targetName then
     self:ClearRows(true)
   end
@@ -106,14 +99,24 @@ function Threat:TargetChanged()
   if self:NeedsUpdates(now) then self:Update(now) end
 end
 
-function Threat:GroupChanged()
+-- Everything tied to the previous target or the previous server exchange.
+-- now starts the wait for a server reply on the new target.
+function Threat:ResetTargetState(now)
   self.requestTarget = nil
   self.nextQuery = 0
   self.lastResponse = nil
   self.lastServerResponse = nil
-  self.serverWaitSince = GetTime()
+  self.serverWaitSince = now
   self.usingEstimate = false
   self:ClearRows(true)
+end
+
+function Threat:GroupChanged()
+  self:ResetTargetState(GetTime and GetTime() or 0)
+  -- A new roster may have a different threat server than the old one, or
+  -- none at all: the wait-for-server-reply hold must be relearned, not kept
+  -- for the rest of the session on the strength of the old group's packets.
+  self.receivedPackets = 0
   local estimator = Skada.ThreatEstimate
   if estimator then
     estimator:PruneActors(function(actorName)
@@ -215,14 +218,8 @@ function Threat:Update(now)
     local changedAt = GetTime and GetTime() or now
     self.targetName = targetName
     self.targetKey = targetKey
-    self.requestTarget = nil
-    self.nextQuery = 0
-    self.lastResponse = nil
-    self.lastServerResponse = nil
-    self.serverWaitSince = changedAt
-    self.usingEstimate = false
+    self:ResetTargetState(changedAt)
     self.burstUntil = changedAt + self.burstDuration
-    self:ClearRows(true)
   end
 
   if not targetName then
@@ -231,9 +228,16 @@ function Threat:Update(now)
     return
   end
 
+  -- The local estimate paints immediately and a live server reply replaces
+  -- it; the estimate only steps back in once server data has gone stale.
+  -- Grouped players who have already heard from a threat server get a short
+  -- hold after a switch so the reply paints first instead of an estimate
+  -- that the reply would reshuffle a moment later. Solo players, and groups
+  -- without a server, never wait for data that cannot arrive.
   local serverFresh = self.lastServerResponse and now - self.lastServerResponse <= self.estimateGrace
-  local waitedLongEnough = now - (self.serverWaitSince or now) >= self.estimateGrace
-  if not serverFresh and waitedLongEnough then
+  local holdForServer = self:IsGrouped() and (self.receivedPackets or 0) > 0
+  local waitedLongEnough = now - (self.serverWaitSince or now) >= self.serverHold
+  if not serverFresh and (not holdForServer or waitedLongEnough) then
     self:ApplyEstimate(now, targetName, targetKey)
   end
 
@@ -353,14 +357,9 @@ function Threat:Initialize()
   self.rowsByName = {}
   self.targetName = self:GetTargetName(false)
   self.targetKey = self:GetTargetKey(self.targetName)
-  self.requestTarget = nil
-  self.nextQuery = 0
-  self.lastResponse = nil
-  self.lastServerResponse = nil
-  self.serverWaitSince = GetTime()
+  self:ResetTargetState(GetTime and GetTime() or 0)
   self.burstUntil = nil
   self.receivedPackets = 0
-  self.usingEstimate = false
   self.estimateRows = {}
 end
 
@@ -369,19 +368,11 @@ Skada:RegisterEvent("CHAT_MSG_ADDON", function(eventName, prefix, message)
 end)
 Skada:RegisterEvent("PLAYER_TARGET_CHANGED", function() Threat:TargetChanged() end)
 Skada:RegisterEvent("PLAYER_REGEN_DISABLED", function()
-  Threat.lastResponse = nil
-  Threat.lastServerResponse = nil
-  Threat.serverWaitSince = GetTime()
-  Threat.usingEstimate = false
+  Threat:ResetTargetState(GetTime())
   Threat:TargetChanged()
 end)
 Skada:RegisterEvent("PLAYER_REGEN_ENABLED", function()
-  Threat.requestTarget = nil
-  Threat.lastResponse = nil
-  Threat.lastServerResponse = nil
-  Threat.serverWaitSince = nil
-  Threat.usingEstimate = false
-  Threat:ClearRows(true)
+  Threat:ResetTargetState(GetTime())
   Skada:MarkDirty()
 end)
 Skada:RegisterEvent("PARTY_MEMBERS_CHANGED", function() Threat:GroupChanged() end)

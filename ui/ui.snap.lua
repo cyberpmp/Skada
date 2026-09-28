@@ -162,12 +162,12 @@ function SnapDock.PersistGeometry(window, persistPoint)
   local profile = window.db
   local frame = window.frame
   profile.width = max(Style.MIN_WINDOW_WIDTH, floor(frame:GetWidth() + 0.5))
-  local rowStep = profile.barHeight + profile.barSpacing
-  local headerHeight = profile.hideTitle and 0 or Style.HEADER_HEIGHT
-  local contentHeight = frame:GetHeight() - headerHeight - Style.FOOTER_HEIGHT
-  profile.rows = min(30, max(3, contentHeight / rowStep))
+  -- A migrated window may sit a fraction above MAX_ROWS (the trailing
+  -- spacing its saved height still carries); clamping to MAX_ROWS would
+  -- shave that back off on the first drag and reopen the seam.
+  profile.rows = min(Style.MAX_ROWS + 1, max(Style.MIN_ROWS, Style:GetRowsForHeight(profile, frame:GetHeight())))
   if frame.SetHeight then
-    frame:SetHeight(headerHeight + profile.rows * rowStep + Style.FOOTER_HEIGHT)
+    frame:SetHeight(Style:GetWindowHeight(profile, profile.rows))
   end
   window.layoutDirty = true
   if persistPoint then

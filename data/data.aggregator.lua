@@ -225,6 +225,10 @@ function DataAggregator:RecordDeathSet(set, actorName, identity, now, killerName
   local cause
   if killerName then
     cause = "Killed by " .. killerName .. (killerSpell and (" (" .. killerSpell .. ")") or "")
+  elseif killerSpell then
+    -- A blank capture hides the killer's name, but the client still saw the
+    -- spell that landed: keep it instead of a bare "Unknown cause".
+    cause = "Unknown cause (" .. killerSpell .. ")"
   else
     cause = "Unknown cause"
   end

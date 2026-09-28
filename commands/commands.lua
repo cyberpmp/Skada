@@ -34,6 +34,7 @@ end
 
 local function printHelp()
   Skada:Print("/skada (or /skada config) opens the settings panel.")
+  Skada:Print("  /skada reset")
   Skada:Print("  /skada center")
   Skada:Print("  /skada status")
   Skada:Print("  /skada help")
@@ -41,6 +42,12 @@ end
 
 registerSlashCommand({ name = "config", aliases = { "settings", "options" }, handler = function()
   if Skada.Options then Skada.Options:Open() end
+end })
+
+-- Typed on purpose, so it resets without the confirmation prompt.
+registerSlashCommand({ name = "reset", handler = function()
+  Skada.Data:Reset()
+  Skada:Print("Data reset.")
 end })
 
 registerSlashCommand({ name = "center", handler = function()

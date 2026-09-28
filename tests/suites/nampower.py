@@ -77,6 +77,23 @@ def run(ctx: Context):
       assert(alice.damageTargets["Boar"].amount == 650,
         "the enemy GUID was not resolved into a damaged-target row")
 
+      -- The packet's exact target GUID reaches the threat estimator, so a hit
+      -- on an untargeted twin never lands on the targeted one. The player is
+      -- targeting 0xC while Bob hits a second Boar, 0xD.
+      TestRegisterGUIDUnit("0xD", "Boar", "WARRIOR", false, 400, 800)
+      local estimator = Skada.ThreatEstimate
+      estimator:Reset()
+      fire("SPELL_DAMAGE_EVENT_OTHER", "0xD", "0xB", 133, 500, "0,0,0", 0, 2, "2,0,0,0")
+      assert(estimator.threatByEnemyKey["0xD"] and estimator.threatByEnemyKey["0xD"].Bob,
+        "Nampower damage on the untargeted twin did not key by its GUID")
+      assert(not estimator.threatByEnemyKey["0xC"],
+        "Nampower damage on the untargeted twin landed on the targeted mob")
+      -- The death packet drops exactly that mob, whatever the target says.
+      fire("UNIT_DIED", "0xD")
+      assert(not estimator.threatByEnemyKey["0xD"] and not estimator.enemyByKey["0xD"],
+        "a Nampower death packet did not remove the fallen mob by GUID")
+      estimator:Reset()
+
       -- Damage taken flows the other way: the enemy GUID is the source and the
       -- named group member is the victim.
       fire("SPELL_DAMAGE_EVENT_OTHER", "0xA", "0xC", 8092, 120, "0,0,0", 0, 5, "2,0,0,0")
@@ -190,6 +207,11 @@ def run(ctx: Context):
         "an unresolvable GUID was not counted")
       assert(alice.damage == damageBefore,
         "an unresolvable GUID pair leaked into an existing actor")
+      -- A caster the client cannot name (a stranger's summon, an unseen
+      -- unit) hitting a known target must not be credited to the player.
+      fire("SPELL_DAMAGE_EVENT_OTHER", "0xC", "0xNOPE", 22703, 255, "0,0,0", 0, 2, "2,0,0,0")
+      assert(alice.damage == damageBefore,
+        "an unnamed caster's damage was credited to the player")
 
       -- Disabling restores the chat path ---------------------------------------
 

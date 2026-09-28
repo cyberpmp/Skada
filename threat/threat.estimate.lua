@@ -5,6 +5,8 @@ local ThreatEstimator = {
   enemyByKey = {},
   enemyCount = 0,
   enemyKeyByName = {},
+  targetProbeName = nil,
+  targetProbeGUID = nil,
   damageMultiplierBySpellID = {},
   damageMultiplierBySpellName = {},
   explicitThreatBySpellID = {},
@@ -28,6 +30,11 @@ local setmetatable = setmetatable
 local ZERO_GUID_LONG = "0x0000000000000000"
 local ZERO_GUID_SHORT = "0x000000000"
 local NAME_PREFIX = "NAME:"
+-- A mob that evades, despawns or dies without a death line never sends a
+-- removal. After this long without damage or attention it stops counting as
+-- a live enemy for the heal split, and its table and name mapping go with
+-- it so a stale mapping cannot re-register it on a later hit.
+local ENEMY_IDLE_SECONDS = 30
 
 local entryPoolsByOutput = setmetatable({}, { __mode = "k" })
 
@@ -60,6 +67,12 @@ local function isUsableGUID(guid)
   return guid and guid ~= "" and guid ~= ZERO_GUID_LONG and guid ~= ZERO_GUID_SHORT
 end
 
+-- Real GUIDs ("0x" plus hex digits) are the only identifiers shaped nothing
+-- like a mob name; a key shaped like this has no name path to walk.
+local function isGUIDShaped(value)
+  return type(value) == "string" and string_find(value, "^0x%x+$") ~= nil
+end
+
 local function containsBitFlag(value, flag)
   value = tonumber(value) or 0
   local quotient = floor(value / flag)
@@ -72,26 +85,56 @@ local function readSpellRecordField(spellID, fieldName)
   if succeeded then return value end
 end
 
-local function findUnitGUIDByName(enemyName)
-  if not enemyName or not UnitExists or not UnitName or not UnitGUID then return nil end
+-- The 1.12 client keeps a corpse on the target token and a hunter's pet can
+-- carry a wild mob's species name, so a name match alone never picks a unit.
+local function isLiveEnemyUnit(unitToken)
+  if not UnitExists or not UnitExists(unitToken) then return false end
+  if UnitIsDead and UnitIsDead(unitToken) then return false end
+  if UnitIsPlayer and UnitIsPlayer(unitToken) then return false end
+  if UnitCanAttack and not UnitCanAttack("player", unitToken) then return false end
+  return true
+end
 
-  local candidateIndex, unitToken
+-- The GUID of the unit on unitToken when it is a live enemy named enemyName.
+local function liveEnemyGUIDOnToken(unitToken, enemyName)
+  if not enemyName or not UnitName or not UnitGUID then return nil end
+  if UnitName(unitToken) ~= enemyName or not isLiveEnemyUnit(unitToken) then return nil end
+  local unitGUID = UnitGUID(unitToken)
+  if isUsableGUID(unitGUID) then return unitGUID end
+end
+
+-- The one live-enemy guard, shared with the threat window's target checks.
+function ThreatEstimator:IsLiveEnemyUnit(unitToken)
+  return isLiveEnemyUnit(unitToken)
+end
+
+-- Calls visit(unitToken) for every token that can hold an enemy: the
+-- player's own units first, then each groupmate's target. Stops when visit
+-- returns true.
+local function eachEnemyUnitToken(visit)
+  local candidateIndex
   for candidateIndex = 1, table_getn(ENEMY_UNIT_CANDIDATES) do
-    unitToken = ENEMY_UNIT_CANDIDATES[candidateIndex]
-    if UnitExists(unitToken) and UnitName(unitToken) == enemyName then return UnitGUID(unitToken) end
+    if visit(ENEMY_UNIT_CANDIDATES[candidateIndex]) then return true end
   end
 
   local groupTokens = Skada.Data and Skada.Data.groupTokens
-  if groupTokens then
-    local groupIndex, groupToken
-    for groupIndex = 1, table_getn(groupTokens) do
-      groupToken = groupTokens[groupIndex]
-      if groupToken ~= "player" then
-        unitToken = groupToken .. "target"
-        if UnitExists(unitToken) and UnitName(unitToken) == enemyName then return UnitGUID(unitToken) end
-      end
-    end
+  if not groupTokens then return false end
+  local groupIndex, groupToken
+  for groupIndex = 1, table_getn(groupTokens) do
+    groupToken = groupTokens[groupIndex]
+    if groupToken ~= "player" and visit(groupToken .. "target") then return true end
   end
+  return false
+end
+
+local function findUnitGUIDByName(enemyName)
+  local foundGUID
+  if not UnitExists then return nil end
+  eachEnemyUnitToken(function(unitToken)
+    if UnitExists(unitToken) then foundGUID = liveEnemyGUIDOnToken(unitToken, enemyName) end
+    return foundGUID ~= nil
+  end)
+  return foundGUID
 end
 
 local function mergeActorThreat(destination, source)
@@ -123,6 +166,10 @@ local function removeEnemyByKey(estimator, enemyKey)
   for enemyName, mappedKey in pairs(estimator.enemyKeyByName) do
     if mappedKey == enemyKey then estimator.enemyKeyByName[enemyName] = nil end
   end
+  -- The probe cache answers "the live mob on the target token". A removed
+  -- key that matches it is a dead or gone mob, so only its name may stay
+  -- cached; the GUID must never answer for it again.
+  if estimator.targetProbeGUID == enemyKey then estimator.targetProbeGUID = nil end
 end
 
 function ThreatEstimator:ClearSpellMetadataCache()
@@ -168,11 +215,10 @@ end
 
 function ThreatEstimator:PromoteEnemyNameToGUID(enemyName, enemyGUID)
   if not enemyName or not isUsableGUID(enemyGUID) then return end
+  -- Two mobs can share a name (a pull of two Boars). Repointing the name at
+  -- the new GUID keeps the other mob's table intact, so switching back shows
+  -- its threat instead of an empty window.
   local nameKey = NAME_PREFIX .. enemyName
-  local previousKey = self.enemyKeyByName[enemyName]
-  if previousKey and previousKey ~= nameKey and previousKey ~= enemyGUID then
-    removeEnemyByKey(self, previousKey)
-  end
   if nameKey ~= enemyGUID and self.threatByEnemyKey[nameKey] then
     local destination = self.threatByEnemyKey[enemyGUID]
     if not destination then
@@ -198,14 +244,35 @@ function ThreatEstimator:PromoteEnemyNameToGUID(enemyName, enemyGUID)
   self.enemyKeyByName[enemyName] = enemyGUID
 end
 
-function ThreatEstimator:ResolveEnemyKey(enemyName, knownGUID)
+-- A chat line names the enemy only. For the player's own hits the live
+-- target may stand in for the name (a corpse or a same-named pet on the
+-- token never qualifies), but a groupmate's line must not: it may be naming
+-- a different mob than the one the player is looking at. The probe answer
+-- is cached and refreshed on target changes and removals, so once the
+-- target is known an own hit costs no unit calls.
+function ThreatEstimator:ResolveEnemyKey(enemyName, knownGUID, ownHit)
   enemyName = trim(enemyName)
   if isUsableGUID(knownGUID) then
     self:PromoteEnemyNameToGUID(enemyName, knownGUID)
     return knownGUID
   end
 
-  local cachedKey = enemyName and self.enemyKeyByName[enemyName]
+  if not enemyName then return nil end
+  local cachedKey = self.enemyKeyByName[enemyName]
+
+  local targetGUID
+  if ownHit then
+    if self.targetProbeName == enemyName and self.targetProbeGUID then
+      targetGUID = self.targetProbeGUID
+    else
+      targetGUID = liveEnemyGUIDOnToken("target", enemyName)
+    end
+  end
+  if targetGUID then
+    if cachedKey ~= targetGUID then self:PromoteEnemyNameToGUID(enemyName, targetGUID) end
+    return targetGUID
+  end
+
   if cachedKey then return cachedKey end
 
   local discoveredGUID = findUnitGUIDByName(enemyName)
@@ -214,7 +281,6 @@ function ThreatEstimator:ResolveEnemyKey(enemyName, knownGUID)
     return discoveredGUID
   end
 
-  if not enemyName then return nil end
   local nameKey = NAME_PREFIX .. enemyName
   self.enemyKeyByName[enemyName] = nameKey
   return nameKey
@@ -268,10 +334,30 @@ function ThreatEstimator:GetOrCreateActorThreat(enemyKey, actorName, identity)
   return actorThreat
 end
 
-function ThreatEstimator:RecordDamage(actorName, identity, targetName, amount, spellName, spellID, timestamp)
+-- An expired enemy leaves the whole estimate: the count that splits heal
+-- threat, its threat table and its name mapping. A stale mapping would
+-- re-register the mob on the next hit, and a name-only death could no
+-- longer match it.
+function ThreatEstimator:ExpireIdleEnemies(now)
+  if not now then return end
+  local enemyKey, enemy
+  for enemyKey, enemy in pairs(self.enemyByKey) do
+    if enemy.lastSeen and now - enemy.lastSeen > ENEMY_IDLE_SECONDS then
+      removeEnemyByKey(self, enemyKey)
+    end
+  end
+end
+
+-- targetGUID is the exact unit when the Nampower packet path supplied one;
+-- chat lines carry a name only and fall back to the target heuristic. That
+-- heuristic is the player's own: a line from anyone else names a mob the
+-- player may not be looking at. Pets merge into the player upstream, so the
+-- player's name covers the whole "own hits" set.
+function ThreatEstimator:RecordDamage(actorName, identity, targetName, amount, spellName, spellID, timestamp, targetGUID)
   amount = tonumber(amount) or 0
   if not actorName or not targetName or amount <= 0 then return end
-  local enemyKey = self:ResolveEnemyKey(targetName)
+  local ownHit = actorName == (Skada.Data and Skada.Data:GetPlayerName() or nil)
+  local enemyKey = self:ResolveEnemyKey(targetName, targetGUID, ownHit)
   if not enemyKey then return end
   self:RecordEnemyActivity(enemyKey, targetName, timestamp)
   local actorThreat = self:GetOrCreateActorThreat(enemyKey, actorName, identity)
@@ -281,20 +367,34 @@ function ThreatEstimator:RecordDamage(actorName, identity, targetName, amount, s
   end
 end
 
+-- The heal split observes the mob on the target token so a fight where the
+-- player never swings still splits against the right enemy; the probe cache
+-- is refreshed here for the same reason.
 function ThreatEstimator:ObserveCurrentEnemy(timestamp)
-  if not UnitExists or not UnitExists("target") or not UnitName then return end
-  if UnitIsDead and UnitIsDead("target") then return end
-  if UnitIsPlayer and UnitIsPlayer("target") then return end
-  if UnitCanAttack and not UnitCanAttack("player", "target") then return end
+  self:ProbeTargetToken()
+  if not self.targetProbeName then return end
+  local enemyKey = self:ResolveEnemyKey(self.targetProbeName, self.targetProbeGUID, true)
+  self:RecordEnemyActivity(enemyKey, self.targetProbeName, timestamp)
+end
+
+-- Caches what the target token currently holds when it is a live enemy. Own
+-- damage lines resolve against this instead of re-probing the token, and
+-- PLAYER_TARGET_CHANGED refreshes it the moment the token changes.
+function ThreatEstimator:ProbeTargetToken()
+  self.targetProbeName, self.targetProbeGUID = nil, nil
+  if not UnitName or not isLiveEnemyUnit("target") then return end
   local enemyName = UnitName("target")
-  local enemyKey = self:ResolveEnemyKey(enemyName, UnitGUID and UnitGUID("target") or nil)
-  self:RecordEnemyActivity(enemyKey, enemyName, timestamp)
+  local enemyGUID = UnitGUID and UnitGUID("target") or nil
+  if not enemyName or enemyName == "" or not isUsableGUID(enemyGUID) then return end
+  self.targetProbeName = enemyName
+  self.targetProbeGUID = enemyGUID
 end
 
 function ThreatEstimator:RecordHealing(actorName, identity, amount, timestamp)
   amount = tonumber(amount) or 0
   if not actorName or amount <= 0 then return end
   self:ObserveCurrentEnemy(timestamp)
+  self:ExpireIdleEnemies(timestamp)
 
   local enemyCount = self.enemyCount or 0
   local enemyKey
@@ -365,6 +465,7 @@ function ThreatEstimator:RecordSpellGo(spellID, casterGUID, targetGUID, targetsH
   end
 
   if allThreat ~= 0 then
+    self:ExpireIdleEnemies(timestamp)
     local enemyKey, enemy
     for enemyKey, enemy in pairs(self.enemyByKey) do
       self:AddExplicitThreat(enemyKey, enemy.name, actorName, identity, allThreat, timestamp)
@@ -372,24 +473,67 @@ function ThreatEstimator:RecordSpellGo(spellID, casterGUID, targetGUID, targetsH
   end
 end
 
-function ThreatEstimator:RemoveEnemy(identifier)
+function ThreatEstimator:IsTrackedKey(enemyKey)
+  return enemyKey ~= nil and (self.enemyByKey[enemyKey] ~= nil or self.threatByEnemyKey[enemyKey] ~= nil)
+end
+
+-- identifier is a GUID from UNIT_DIED or a bare name from a "X dies." line;
+-- deathGUID is the exact unit when the Nampower death packet carried one.
+-- A name-only death cannot say which of two same-named mobs fell. A dead
+-- target carrying the name is the one that fell and only its table goes.
+-- Otherwise every same-named mob still alive on a unit token (the target,
+-- a groupmate's target, focus, mouseover) keeps its table and the rest go;
+-- with no such mob in sight, every table under the name goes.
+function ThreatEstimator:RemoveEnemy(identifier, deathGUID)
   if not identifier then return end
 
-  local mappedKey = self.enemyKeyByName[identifier]
-  if mappedKey then
-    removeEnemyByKey(self, mappedKey)
+  if isUsableGUID(deathGUID) then
+    removeEnemyByKey(self, deathGUID)
+    removeEnemyByKey(self, NAME_PREFIX .. identifier)
     return
   end
 
-  if self.enemyByKey[identifier] or self.threatByEnemyKey[identifier] then
+  -- A GUID carries no name to match tokens with: remove it by key and stop
+  -- instead of sweeping every token for a mob "named" 0x....
+  if isGUIDShaped(identifier) then
     removeEnemyByKey(self, identifier)
     return
   end
 
+  if self:IsTrackedKey(identifier) then
+    removeEnemyByKey(self, identifier)
+    return
+  end
+
+  if UnitExists and UnitExists("target") and UnitName and UnitName("target") == identifier
+    and UnitIsDead and UnitIsDead("target") then
+    local corpseGUID = UnitGUID and UnitGUID("target")
+    if isUsableGUID(corpseGUID) then
+      -- The corpse is the mob that fell even when nothing was ever tracked
+      -- under its GUID: stopping here keeps the survivor search below from
+      -- sweeping out a live same-named twin tracked elsewhere.
+      removeEnemyByKey(self, corpseGUID)
+      removeEnemyByKey(self, NAME_PREFIX .. identifier)
+      return
+    end
+  end
+
+  local survivorByKey = {}
+  eachEnemyUnitToken(function(unitToken)
+    local liveGUID = liveEnemyGUIDOnToken(unitToken, identifier)
+    if liveGUID and self:IsTrackedKey(liveGUID) then survivorByKey[liveGUID] = true end
+  end)
+
+  local mappedKey = self.enemyKeyByName[identifier]
+  if mappedKey and not survivorByKey[mappedKey] then removeEnemyByKey(self, mappedKey) end
   local enemyKey, enemy
   for enemyKey, enemy in pairs(self.enemyByKey) do
-    if enemy.name == identifier then removeEnemyByKey(self, enemyKey) end
+    if enemy.name == identifier and not survivorByKey[enemyKey] then removeEnemyByKey(self, enemyKey) end
   end
+  removeEnemyByKey(self, NAME_PREFIX .. identifier)
+
+  local targetSurvivor = liveEnemyGUIDOnToken("target", identifier)
+  if targetSurvivor and survivorByKey[targetSurvivor] then self.enemyKeyByName[identifier] = targetSurvivor end
 end
 
 function ThreatEstimator:PruneActors(keepPredicate)
@@ -456,15 +600,16 @@ function ThreatEstimator:Reset()
   wipeTable(self.enemyByKey)
   wipeTable(self.enemyKeyByName)
   self.enemyCount = 0
+  self.targetProbeName, self.targetProbeGUID = nil, nil
 end
 
-Skada:Subscribe("damageRecorded", function(actorName, identity, targetName, amount, spellName, spellID, timestamp)
-  ThreatEstimator:RecordDamage(actorName, identity, targetName, amount, spellName, spellID, timestamp)
+Skada:Subscribe("damageRecorded", function(actorName, identity, targetName, amount, spellName, spellID, timestamp, targetGUID)
+  ThreatEstimator:RecordDamage(actorName, identity, targetName, amount, spellName, spellID, timestamp, targetGUID)
 end)
 Skada:Subscribe("healingRecorded", function(actorName, identity, amount, timestamp)
   ThreatEstimator:RecordHealing(actorName, identity, amount, timestamp)
 end)
-Skada:Subscribe("unitDied", function(identifier) ThreatEstimator:RemoveEnemy(identifier) end)
+Skada:Subscribe("unitDied", function(unitName, unitGUID) ThreatEstimator:RemoveEnemy(unitName, unitGUID) end)
 Skada:Subscribe("combatStateChanged", function() ThreatEstimator:Reset() end)
 Skada:Subscribe("dataReset", function() ThreatEstimator:Reset() end)
 
@@ -473,6 +618,7 @@ Skada:RegisterEvent("PLAYER_ENTERING_WORLD", function()
   ThreatEstimator:ClearSpellMetadataCache()
 end)
 Skada:RegisterEvent("PLAYER_TARGET_CHANGED", function()
+  ThreatEstimator:ProbeTargetToken()
   if Skada.Data and Skada.Data.active then ThreatEstimator:ObserveCurrentEnemy(GetTime()) end
 end)
 Skada:RegisterEvent("UNIT_DIED", function(_, guid) ThreatEstimator:RemoveEnemy(guid) end)

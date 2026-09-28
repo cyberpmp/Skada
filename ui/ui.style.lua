@@ -22,8 +22,13 @@ Style.HEADER_BUTTON_HEIGHT = 18
 Style.HEADER_BUTTON_GAP = 2
 Style.HEADER_BUTTON_ALPHA = 0.82
 Style.MIN_WINDOW_WIDTH = 180
+-- One margin keeps the bars off every edge: beside them, below the last
+-- bar, and above the first bar when the title bar is hidden.
 Style.WINDOW_PADDING = 6
-Style.FOOTER_HEIGHT = 6
+Style.FOOTER_HEIGHT = Style.WINDOW_PADDING
+Style.HEADLESS_TOP_INSET = Style.WINDOW_PADDING
+Style.MIN_ROWS = 3
+Style.MAX_ROWS = 30
 Style.BAR_ANIMATION_SPEED = 5
 Style.BAR_EASE = 0.04 + Style.BAR_ANIMATION_SPEED * 0.025
 
@@ -140,6 +145,34 @@ Style.CLASS_ICON_TCOORDS = {
   WARLOCK = { 0.7421875, 0.98828125, 0.25, 0.5 },
   PALADIN = { 0, 0.25, 0.5, 0.75 },
 }
+
+-- Vertical space reserved above the first row: the title bar, or a slim
+-- inset when the window runs headless.
+function Style:GetHeaderHeight(profile)
+  if profile and profile.hideTitle then return self.HEADLESS_TOP_INSET end
+  return self.HEADER_HEIGHT
+end
+
+function Style:GetRowStep(profile)
+  return profile.barHeight + profile.barSpacing
+end
+
+-- Height of the bars for a (possibly fractional) row count. The trailing
+-- bar spacing is dropped so the last bar sits WINDOW_PADDING above the
+-- bottom edge, matching the side padding and the headless top inset.
+function Style:GetContentHeight(profile, rows)
+  return rows * self:GetRowStep(profile) - profile.barSpacing
+end
+
+function Style:GetWindowHeight(profile, rows)
+  return self:GetHeaderHeight(profile) + self:GetContentHeight(profile, rows) + self.FOOTER_HEIGHT
+end
+
+-- Inverse of GetWindowHeight: the row count a frame height stands for.
+function Style:GetRowsForHeight(profile, height)
+  local contentHeight = height - self:GetHeaderHeight(profile) - self.FOOTER_HEIGHT
+  return (contentHeight + profile.barSpacing) / self:GetRowStep(profile)
+end
 
 function Style:GetBarTexture()
   local profile = Skada.db and Skada.db.profile

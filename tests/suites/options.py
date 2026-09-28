@@ -837,6 +837,11 @@ def run(ctx: Context):
       assert(table.getn(Skada.Data.history) <= profile.maxSegments,
         "history was not trimmed to the new value")
 
+      -- Earlier suites leave the client flagged in combat, and a reset taken
+      -- mid-fight reopens a segment; the zone policies below only apply out
+      -- of combat, so take the whole block out of combat first.
+      Skada.Data.clientInCombat = false
+      Skada.Data.active = false
       table.insert(Skada.Data.history, Skada.Data.current)
       generalArgs.resetData.func({})
       assert(TestLastPopup == "SKADA_RESET_DATA", tostring(TestLastPopup))

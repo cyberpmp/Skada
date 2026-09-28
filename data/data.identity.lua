@@ -124,11 +124,15 @@ function DataIdentity:GetIdentityByName(name)
   return name and self.identitiesByName[trim(name)] or nil
 end
 
+-- Only a literal "You" stands for the player. A blank or missing name is a
+-- unit the client could not see (a stranger's summon, an out-of-range
+-- caster) and resolves to nothing rather than to the player. The blank
+-- guard runs before the resolvers: if the YOU constant were ever unset, a
+-- nil name must still not fall through to the player.
 function DataIdentity:ResolveSource(name)
   name = trim(name)
-  if not name or name == "" or name == YOU or name == "You" then
-    name = self.playerName
-  end
+  if not name or name == "" then return end
+  if name == YOU or name == "You" then name = self.playerName end
 
   local identity = self.identitiesByName[name]
   local trackAll = Skada.db.profile.trackAll
@@ -167,9 +171,8 @@ end
 
 function DataIdentity:ResolveTarget(name)
   name = trim(name)
-  if not name or name == "" or name == YOU or name == "You" then
-    name = self.playerName
-  end
+  if name == YOU or name == "You" then name = self.playerName end
+  if not name or name == "" then return nil, nil, nil end
   local identity = self.identitiesByName[name]
   if identity and identity.interesting then return name, identity, name end
   return nil, nil, name

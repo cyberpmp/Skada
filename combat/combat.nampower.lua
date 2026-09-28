@@ -228,7 +228,7 @@ local function recordDamage(sourceGUID, targetGUID, amount, spellName, spellID, 
   if not sourceName and not targetName then return end
 
   Skada.Data:RecordDamage(sourceName, targetName, amount, spellName, spellID,
-    school or "Physical", critical, GetTime(), mitigationType, mitigationAmount)
+    school or "Physical", critical, GetTime(), mitigationType, mitigationAmount, targetGUID)
 end
 
 local function recordAvoidance(sourceGUID, targetGUID, spellName, avoidanceType)
@@ -304,7 +304,7 @@ local function onEnvironmentalDamage(unitGUID, damageType, damage, absorb, resis
   local spellName = ENVIRONMENT_NAMES[tonumber(damageType) or -1] or "Environment"
   -- The environment has no actor. Naming the victim as its own source marks the
   -- hit as self damage, which records damage taken without inventing a damage
-  -- dealer; a nil source would otherwise fall through to the active player.
+  -- dealer; a nil source would record nothing at all.
   Skada.Data:RecordDamage(targetName, targetName, damage, spellName, nil, "Physical", false,
     GetTime(), mitigationType, mitigationAmount)
 end
@@ -329,7 +329,7 @@ local function onUnitDied(guid)
   if not targetName then return end
   local lastDamage = Skada.Tracking and Skada.Tracking:GetLastDamageInfo(targetName)
   Skada.Data:RecordDeath(targetName, GetTime(), lastDamage and lastDamage.sourceName,
-    lastDamage and lastDamage.spellName)
+    lastDamage and lastDamage.spellName, guid)
   forgetName(guid)
 end
 

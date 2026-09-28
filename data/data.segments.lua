@@ -29,7 +29,11 @@ end
 
 function DataSegments:EnsureSegment(now, targetName, mayStart)
   if not self.active then
-    if not mayStart then return nil end
+    -- Damage lines may start a segment themselves. The other facts must
+    -- still be recorded while a fight is going on around a client that
+    -- stands still: a healer out of the mobs' range, a death from an
+    -- unseen caster.
+    if not mayStart and not (self.clientInCombat or self:GroupInCombat(now)) then return nil end
     return self:StartSegment(now, targetName)
   elseif targetName and self.current.name == "Current" then
     self.current.name = targetName
@@ -67,6 +71,17 @@ function DataSegments:IsGroupInCombat()
     if UnitExists(unitToken) and UnitAffectingCombat and UnitAffectingCombat(unitToken) then return true end
   end
   return false
+end
+
+-- Throttled view of IsGroupInCombat, shared by the tick and the non-damage
+-- entry points: a full token scan is too costly to run per combat line.
+function DataSegments:GroupInCombat(now)
+  now = now or GetTime()
+  if not self.nextGroupCheck or now >= self.nextGroupCheck then
+    self.nextGroupCheck = now + 0.5
+    self.groupInCombat = self:IsGroupInCombat()
+  end
+  return self.groupInCombat
 end
 
 function DataSegments:OnCombatEnter(now)
@@ -139,11 +154,7 @@ function DataSegments:Update(now)
     return
   end
 
-  if not self.nextGroupCheck or now >= self.nextGroupCheck then
-    self.nextGroupCheck = now + 0.5
-    self.groupInCombat = self:IsGroupInCombat()
-  end
-  if self.groupInCombat then
+  if self:GroupInCombat(now) then
     self.noCombatSince = nil
     return
   end
@@ -166,6 +177,11 @@ function DataSegments:Reset()
   self.noCombatSince = nil
   self.nextBossTargetScan = nil
   Skada:Publish("dataReset")
+  -- A reset mid-fight (the slash command, the popup) must not leave the
+  -- segment closed while the fight goes on: PLAYER_REGEN_DISABLED will not
+  -- refire, and every non-damage fact would drop until a damage line
+  -- reopened a segment. Start the new fight straight away instead.
+  if self.clientInCombat or self:GroupInCombat(now) then self:StartSegment(now) end
   Skada:MarkDirty()
 end
 

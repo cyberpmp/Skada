@@ -122,6 +122,7 @@ size matching behavior are configured per window.
 | Command | Action |
 | --- | --- |
 | `/skada`, `/sk`, `/skada config` | Open settings |
+| `/skada reset` | Reset all fight data immediately, with no confirmation prompt |
 | `/skada center` | Center and show the active window |
 | `/skada status` | Print segment state, current damage, and parser misses |
 | `/skada help` | Print command help |

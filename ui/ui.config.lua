@@ -115,4 +115,24 @@ function WindowConfig.Migrate(profile)
     end
     profile.visualVersion = 5
   end
+
+  -- 2.0.3 dropped the spacing after the last bar from the window height,
+  -- and headless windows grew a top inset. Snapped windows are stored by
+  -- their bottom-left corner, so a shorter window would open a seam under
+  -- the one docked above it. Re-deriving the row count from the pixel
+  -- height the window was saved with keeps every window at its old size.
+  if profile.visualVersion < 6 then
+    local Style = Skada.UIStyle
+    local function keepWindowHeight(config)
+      if config.point ~= "BOTTOMLEFT" then return end
+      local rows, barHeight, barSpacing = tonumber(config.rows), tonumber(config.barHeight), tonumber(config.barSpacing)
+      if not rows or not barHeight or not barSpacing or barHeight + barSpacing <= 0 then return end
+      local legacyHeight = (config.hideTitle and 0 or Style.HEADER_HEIGHT)
+        + rows * (barHeight + barSpacing) + Style.FOOTER_HEIGHT
+      config.rows = Style:GetRowsForHeight(config, legacyHeight)
+    end
+    for windowIndex = 1, table_getn(profile.windows or {}) do keepWindowHeight(profile.windows[windowIndex]) end
+    keepWindowHeight(profile)
+    profile.visualVersion = 6
+  end
 end

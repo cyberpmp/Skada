@@ -164,9 +164,18 @@ function Parser:AddGlobal(events, globalName, handler)
   self:AddPattern(events, _G[globalName], handler, string_find(globalName, "CRIT") ~= nil, globalName)
 end
 
+-- The 1.12 client prints an empty name for a unit it cannot see ("'s Inferno
+-- Effect hits Boar"). An empty capture is the same fact as a missing one, so
+-- it becomes nil here and never reaches a segment name or a death recap.
+local function nonEmpty(capture)
+  if capture == "" then return nil end
+  return capture
+end
+
 function Parser:Match(entry, message)
   local start, _, first, second, third, fourth, fifth = string_find(message, entry.pattern)
   if not start then return false end
+  first, second, third, fourth, fifth = nonEmpty(first), nonEmpty(second), nonEmpty(third), nonEmpty(fourth), nonEmpty(fifth)
   if entry.directCaptures then return true, first, second, third, fourth, fifth end
   local positions = entry.positions
   return true,

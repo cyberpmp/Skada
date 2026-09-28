@@ -4,7 +4,73 @@ All notable changes to the PMP Skada rewrite are documented here.
 
 ## Unreleased
 
+## 2.0.3 - 2026-09-28
+
+### Added
+
+- `/skada reset` wipes all fight data immediately. It skips the confirmation
+  prompt on purpose, since typing the command is deliberate. A reset taken
+  mid-fight, by the command or the confirmation popup, now opens a fresh
+  segment straight away instead of dropping heals, deaths and counts until
+  the next damage line.
+
+### Fixed
+
+- Estimated threat for two mobs sharing a name (a pull of two Boars) no longer
+  erases the first mob's table when the second is targeted. Chat-log damage
+  now lands on the live same-named mob you are targeting (a corpse or a
+  same-named pet on the target never qualifies), and switching back shows the
+  earlier threat instead of an empty window. Nampower damage and death packets
+  key by the exact unit, so hits on the untargeted twin no longer land on the
+  targeted one. A name-only death line removes a dead target's table, or
+  keeps every same-named mob still alive on your target, focus, mouseover or
+  a groupmate's target and removes the rest; with none in sight every table
+  under the name goes, as before. A corpse parked on your target stops the
+  removal there even when nothing was ever tracked under its GUID, so a live
+  twin tracked elsewhere is not swept out with it. Only your own hits (your
+  pets merge into you) may read the live target as the mob a chat line names;
+  a groupmate's line keeps whatever mob the name last pointed at. The target
+  check for your own swings is cached between lines and refreshed on target
+  changes and removals, so it costs no unit calls per swing. Mobs that evade
+  or despawn without a death line stop splitting heal threat after 30
+  seconds, and their table and name mapping go with them, so a stale mapping
+  cannot re-register an expired mob on the next hit.
+- Damage from a caster the client could not name, such as a stranger's summoned
+  Infernal landing "Inferno Effect" nearby, was credited to you. Blank or
+  missing source names no longer resolve to the player; only a literal "You"
+  does. The same applies to the Nampower packet path when a caster GUID cannot
+  be resolved.
+- The threat window no longer waits two seconds after every target switch
+  before showing estimated threat. Solo players, and groups that have never
+  heard from a threat server, get the local estimate on the first tick.
+  Grouped players with a working server keep a short hold (0.75s) so the
+  reply paints first instead of an estimate it would reshuffle a moment
+  later; a live server reply always replaces the estimate as soon as it
+  lands. Joining or leaving a group resets the hold, so a new roster without
+  a server is not kept waiting on the old group's packets.
+- A caster the client cannot see prints as an empty name in chat. That empty
+  name no longer becomes the fight's segment name or the source in a death
+  recap ("Killed by  (Inferno Effect)"); it is treated as unknown everywhere.
+  The recap still keeps the spell that landed, so a death you could not name
+  reads "Unknown cause (Inferno Effect)" instead of a bare "Unknown cause".
+- Heals, power gains, interrupts and deaths recorded while only the group is
+  fighting - you standing outside the mobs' reach - now open the fight
+  segment instead of being dropped. Unless you were in combat yourself, a
+  segment only opened on damage lines.
+- Meter windows with the title bar hidden anchored the first bar flush against
+  the top border. Headless windows now keep the same 6px inset above the first
+  bar that every window keeps beside and below the bars.
+
 ### Changed
+
+- Window height no longer includes the spacing after the last bar, so the
+  bottom margin matches the side margins exactly instead of running one bar
+  spacing taller. Free-floating windows keep their row count and re-derive
+  their height on the next layout. Snapped windows, which are stored by their
+  bottom-left corner, are migrated by re-deriving the row count from the
+  pixel height the window was saved with, so docked stacks stay seamless
+  without being dragged again - including headless windows (the new top inset
+  would otherwise have made them 6px taller) and full 30-row windows.
 
 - The README now carries a non-affiliation and trademark disclaimer and states
   that no game client files are redistributed.
