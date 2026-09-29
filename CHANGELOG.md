@@ -4,6 +4,13 @@ All notable changes to the PMP Skada rewrite are documented here.
 
 ## Unreleased
 
+### Added
+
+- `/skada status` names the build stamp (`X-Build` in the toc) so same-day
+  rebuilds of one version can be told apart, and each uncredited-source line
+  now also says how the registry sees the source and its owner (absent,
+  refused, plain, tracked, owned) and how many owner reads were tried.
+
 ## 2.0.4 - 2026-09-29
 
 ### Fixed

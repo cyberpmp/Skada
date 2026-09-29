@@ -236,6 +236,10 @@ def run(ctx: Context):
       local lastNote = Nampower.droppedSources[table.getn(Nampower.droppedSources)]
       assert(lastNote and string.find(lastNote, "0xNOPE", 1, true) and string.find(lastNote, "live no", 1, true),
         "an uncredited source was not noted for status: " .. tostring(lastNote))
+      assert(string.find(lastNote, "byGUID absent", 1, true) and string.find(lastNote, "tries 0", 1, true),
+        "the note does not describe the registry's view of the source: " .. lastNote)
+      assert(string.find(Nampower:GetStatusText(), "build test-build", 1, true),
+        "status does not name the build stamp")
 
       -- Summons -----------------------------------------------------------------
 

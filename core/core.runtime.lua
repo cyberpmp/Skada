@@ -3,6 +3,8 @@ local Skada = (_G or getfenv(0)).Skada
 Skada.name = Skada.name or "Skada"
 local metadataVersion = GetAddOnMetadata and GetAddOnMetadata(Skada.name, "Version")
 Skada.version = metadataVersion or "development"
+-- Same-day folds reuse a version number; the build stamp tells them apart.
+Skada.build = GetAddOnMetadata and GetAddOnMetadata(Skada.name, "X-Build") or nil
 Skada.initializers = {}
 Skada.eventHandlers = {}
 Skada.tickers = {}

@@ -332,13 +332,34 @@ local function describeGUID(guid)
   return guid
 end
 
+-- How the identity registry currently sees a unit: absent, refused (seen
+-- and written off), plain (on a token but not tracked), tracked, or owned.
+local function describeIdentity(identity)
+  if identity == nil then return "absent" end
+  if identity == false then return "refused" end
+  if identity.owner then return "owned by " .. identity.owner end
+  if identity.interesting then return "tracked" end
+  return "plain"
+end
+
 function Nampower:NoteDroppedSource(guid, name, spellName)
   local notes = self.droppedSources
   local summoner = summonerGUID(guid)
   local owner = summoner and describeGUID(summoner) or "none"
-  if summoner and Skada.Data:GetIdentityByGUID(summoner) then owner = owner .. " (in group)" end
+  if summoner then
+    local ownerIdentity = Skada.Data:GetIdentityByGUID(summoner)
+    if not ownerIdentity then
+      local ownerName = UnitName(summoner)
+      ownerIdentity = ownerName and Skada.Data:GetIdentityByName(ownerName)
+      if ownerIdentity then owner = owner .. " (by name)" end
+    end
+    owner = owner .. " " .. describeIdentity(ownerIdentity)
+  end
   local text = (name or "unnamed") .. " [" .. guid .. "] " .. tostring(spellName or "?") ..
-    ", live " .. (UnitName(guid) and "yes" or "no") .. ", owner " .. owner
+    ", live " .. (UnitName(guid) and "yes" or "no") .. ", owner " .. owner ..
+    ", byGUID " .. describeIdentity(Skada.Data:GetIdentityByGUID(guid)) ..
+    ", byName " .. describeIdentity(name and Skada.Data:GetIdentityByName(name)) ..
+    ", tries " .. tostring(summonMissesByGUID[guid] or 0)
   if notes[table.getn(notes)] == text then return end
   table.insert(notes, text)
   if table.getn(notes) > DROPPED_SOURCE_LIMIT then table.remove(notes, 1) end
@@ -631,7 +652,7 @@ function Nampower:GetStatusText()
   if not self.available then return "chat text (" .. self.reason .. ")" end
   if not self.active then return "chat text (Nampower off)" end
   return "Nampower events (" .. self.eventCount .. " seen, " .. self.spellGoCount ..
-    " spell-go, " .. self.unresolvedGUIDCount .. " unresolved)"
+    " spell-go, " .. self.unresolvedGUIDCount .. " unresolved), build " .. tostring(Skada.build or "?")
 end
 
 -- Prints the dropped-source notes, most recent last, or one line saying

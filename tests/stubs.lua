@@ -156,6 +156,7 @@ function TestSetPartyMembers(value) partyMemberCount = value end
 function GetNumPartyMembers() return partyMemberCount end
 function GetAddOnMetadata(addonName, field)
   if addonName == "Skada" and field == "Version" then return "1.0.0" end
+  if addonName == "Skada" and field == "X-Build" then return "test-build" end
 end
 function LoggingCombat() end
 function SendAddonMessage(prefix, message, channel)
