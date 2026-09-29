@@ -163,7 +163,24 @@ function SendAddonMessage(prefix, message, channel)
   TestAddonPrefix, TestAddonMessage, TestAddonChannel = prefix, message, channel
 end
 
-C_EventUtils = { IsEventValid = function() return true end }
+-- The client's event validator knows nothing of Nampower's custom codes, so
+-- registering one on Skada's shared frame silently does nothing in game. The
+-- stub refuses them the same way, so a module that listens for a Nampower
+-- event anywhere but the ingest's own frame fails here instead of there.
+local nampowerEventPrefixes = {
+  "SPELL_DAMAGE_EVENT_", "AUTO_ATTACK_", "SPELL_MISS_", "SPELL_HEAL_BY_", "SPELL_ENERGIZE_BY_",
+  "ENVIRONMENTAL_DMG_", "DAMAGE_SHIELD_", "SPELL_DISPEL_BY_", "SPELL_GO_", "SPELL_START_",
+  "SPELL_FAILED_", "SPELL_CAST_EVENT", "SPELL_CHANNEL_", "BUFF_ADDED_", "BUFF_REMOVED_",
+  "DEBUFF_ADDED_", "DEBUFF_REMOVED_", "AURA_CAST_ON_", "UNIT_DIED",
+}
+C_EventUtils = { IsEventValid = function(eventName)
+  local prefixIndex
+  for prefixIndex = 1, table.getn(nampowerEventPrefixes) do
+    local prefix = nampowerEventPrefixes[prefixIndex]
+    if string.sub(eventName, 1, string.len(prefix)) == prefix then return false end
+  end
+  return true
+end }
 C_CreatureInfo = {}
 C_Spell = {
   GetSpellMechanicByID = function() return 0 end,

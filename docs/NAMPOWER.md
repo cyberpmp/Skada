@@ -125,8 +125,9 @@ ability-usage mode would come straight from these.
 
 ### Threat estimator inputs
 
-`threat/threat.estimate.lua` already consumes `SPELL_GO_SELF` / `_OTHER` for
-targets-hit counts. `GetSpellRec` and `GetSpellRecField` expose the client's DBC
+`threat/threat.estimate.lua` already consumes the targets-hit count from
+`SPELL_GO_SELF` / `_OTHER`, republished by the ingest as the `spellGo` bus
+event (Nampower codes never fire on the shared frame). `GetSpellRec` and `GetSpellRecField` expose the client's DBC
 spell record (school, cast time, mana cost, effects, durations), which the
 estimator could use instead of its own tables. The OctoWoW Threat API stays
 authoritative regardless.

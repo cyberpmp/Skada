@@ -320,6 +320,35 @@ def run(ctx: Context):
       fire("SPELL_DAMAGE_EVENT_OTHER", "0xC", "0xGHOST2", 11970, 90, "0,0,0", 0, 4, "2,0,0,0")
       assert(alice.damage == damageBefore, "a stale totem cast vouched for an unnamed caster")
 
+      -- A summon is a source only. Mobs hitting the totem, missing it, or
+      -- the totem exploding must not give it rows of its own or count
+      -- against the owner as damage taken, avoids or deaths.
+      local deathsBefore, avoidsBefore, takenBefore = alice.deaths, alice.avoids, alice.damageTaken
+      TestRegisterGUIDUnit("0xT1", "Fire Nova Totem IV", "WARRIOR", true, 5, 5)
+      fire("SPELL_DAMAGE_EVENT_OTHER", "0xT1", "0xC", 8092, 5, "0,0,0", 0, 5, "2,0,0,0")
+      fire("SPELL_MISS_OTHER", "0xC", "0xT1", 8092, 3)
+      fire("UNIT_DIED", "0xT1")
+      assert(not current.actors["Fire Nova Totem IV"], "a summon got actor rows as a target")
+      assert(alice.deaths == deathsBefore, "a summon's death counted for the owner")
+      assert(alice.avoids == avoidsBefore, "a summon's dodge counted for the owner")
+      assert(alice.damageTaken == takenBefore, "a summon's damage taken counted for the owner: " .. tostring(alice.damageTaken))
+      assert(Skada.Data:IsSummon("Fire Nova Totem IV") and not Skada.Data:IsSummon("Alice"),
+        "IsSummon does not tell summons from players")
+
+      -- Spell-go reaches the threat estimator only through the ingest's own
+      -- frame and the bus. The shared frame refuses Nampower codes, so a
+      -- direct registration would be dead in game.
+      assert(not Skada.eventHandlers["SPELL_GO_SELF"] and not Skada.eventHandlers["SPELL_GO_OTHER"]
+        and not Skada.eventHandlers["UNIT_DIED"],
+        "a Nampower event is registered on the shared frame, where it never fires")
+      local spellGoSeen
+      Skada:Subscribe("spellGo", function(spellID, casterGUID, targetGUID, targetsHit)
+        spellGoSeen = { spellID, casterGUID, targetGUID, targetsHit }
+      end)
+      fire("SPELL_GO_SELF", 0, 133, "0xA", "0xC", 0, 4, 0)
+      assert(spellGoSeen and spellGoSeen[1] == 133 and spellGoSeen[3] == "0xC" and spellGoSeen[4] == 4,
+        "spell-go was not republished on the bus with its targets-hit count")
+
       -- A stranger's summon stays a stranger: its owner is not in the group,
       -- so it is neither credited to the player nor given a bar of its own.
       TestRegisterGUIDUnit("0xT2", "Infernal", "WARRIOR", false, 500, 500)

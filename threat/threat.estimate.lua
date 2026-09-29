@@ -621,10 +621,10 @@ Skada:RegisterEvent("PLAYER_TARGET_CHANGED", function()
   ThreatEstimator:ProbeTargetToken()
   if Skada.Data and Skada.Data.active then ThreatEstimator:ObserveCurrentEnemy(GetTime()) end
 end)
-Skada:RegisterEvent("UNIT_DIED", function(_, guid) ThreatEstimator:RemoveEnemy(guid) end)
-Skada:RegisterEvent("SPELL_GO_SELF", function(_, _, spellID, casterGUID, targetGUID, _, targetsHit)
-  ThreatEstimator:RecordSpellGo(spellID, casterGUID, targetGUID, targetsHit, GetTime())
-end)
-Skada:RegisterEvent("SPELL_GO_OTHER", function(_, _, spellID, casterGUID, targetGUID, _, targetsHit)
-  ThreatEstimator:RecordSpellGo(spellID, casterGUID, targetGUID, targetsHit, GetTime())
+-- Nampower's events never reach the shared frame: its registration is gated
+-- on C_EventUtils.IsEventValid, which does not know Nampower's codes. The
+-- ingest owns the only frame that hears them and republishes spell-go on the
+-- bus; deaths already arrive as unitDied above.
+Skada:Subscribe("spellGo", function(spellID, casterGUID, targetGUID, targetsHit, timestamp)
+  ThreatEstimator:RecordSpellGo(spellID, casterGUID, targetGUID, targetsHit, timestamp)
 end)

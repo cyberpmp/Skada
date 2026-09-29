@@ -461,9 +461,10 @@ end
 -- Every caster is named as soon as its spell goes off. Nothing is recorded
 -- here; the point is to read a summon's name and owner while it still exists,
 -- so the damage packets that follow can be attributed after it despawns.
-local function onSpellGo(itemID, spellID, casterGUID)
+local function onSpellGo(itemID, spellID, casterGUID, targetGUID, castFlags, targetsHit)
   Nampower.spellGoCount = Nampower.spellGoCount + 1
   resolveName(casterGUID)
+  Skada:Publish("spellGo", spellID, casterGUID, targetGUID, targetsHit, GetTime())
 end
 
 -- Totems the player has just dropped, by the spell they will cast, for the
@@ -490,9 +491,10 @@ function Nampower:OwnTotemFor(spellName, now)
   return expected.totem
 end
 
-local function onSpellGoSelf(itemID, spellID)
+local function onSpellGoSelf(itemID, spellID, casterGUID, targetGUID, castFlags, targetsHit)
   Nampower.spellGoCount = Nampower.spellGoCount + 1
   rememberOwnTotem(resolveSpellName(spellID), GetTime())
+  Skada:Publish("spellGo", spellID, casterGUID, targetGUID, targetsHit, GetTime())
 end
 
 local function onUnitDied(guid)

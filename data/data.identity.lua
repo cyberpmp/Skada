@@ -93,6 +93,7 @@ function DataIdentity:AddSummon(name, ownerName, guid)
   end
   identity.owner = ownerName
   identity.interesting = true
+  identity.summon = true
   identity.guid = guid or identity.guid
   if guid then self.identitiesByGUID[guid] = identity end
   return identity
@@ -196,12 +197,21 @@ function DataIdentity:ResolveSource(name)
   end
 end
 
+-- A summon is a source, never a target. A totem is hit by every mob near it
+-- and dies by design when it fires, and a Voidwalker soaks hits for its
+-- master; none of that belongs in damage taken, avoids or deaths. Group
+-- pets on a pet token keep their own rows, as they always have.
+function DataIdentity:IsSummon(name)
+  local identity = name and self.identitiesByName[trim(name)]
+  return identity and identity.summon and true or false
+end
+
 function DataIdentity:ResolveTarget(name)
   name = trim(name)
   if name == YOU or name == "You" then name = self.playerName end
   if not name or name == "" then return nil, nil, nil end
   local identity = self.identitiesByName[name]
-  if identity and identity.interesting then return name, identity, name end
+  if identity and identity.interesting and not identity.summon then return name, identity, name end
   return nil, nil, name
 end
 

@@ -4,6 +4,22 @@ All notable changes to the PMP Skada rewrite are documented here.
 
 ## Unreleased
 
+### Fixed
+
+- Estimated threat for area spells never received Nampower's targets-hit
+  count. The threat estimator listened for the spell-go events on Skada's
+  shared frame, whose registration is gated on the client's event validator,
+  which does not know Nampower's custom codes, so the listener was dead in
+  game. The ingest's own frame now republishes spell-go on the internal bus
+  and the estimator subscribes there. The test stub now refuses Nampower
+  codes on the shared frame the way the client does, so this class of bug
+  fails the suite instead of failing silently.
+- A totem or other tokenless summon no longer appears as its own actor when
+  mobs hit it, miss it, or it dies. Summons are sources only: a totem is hit
+  by every mob near it and dies by design when it fires, and none of that
+  belongs in damage taken, avoids or deaths, for the totem or its owner.
+  Group pets on a pet token keep their own rows as before.
+
 ### Added
 
 - `/skada status` names the build stamp (`X-Build` in the toc) so same-day

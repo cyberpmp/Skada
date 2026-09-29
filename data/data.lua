@@ -26,6 +26,7 @@ local recordDurationSet = DataAggregator.RecordDurationSet
 Data.AddObservedUnit = DataIdentity.AddObservedUnit
 Data.AddGroupUnit = DataIdentity.AddGroupUnit
 Data.AddSummon = DataIdentity.AddSummon
+Data.IsSummon = DataIdentity.IsSummon
 Data.RebuildRoster = DataIdentity.RebuildRoster
 Data.ObserveToken = DataIdentity.ObserveToken
 Data.FindUnitByName = DataIdentity.FindUnitByName
@@ -184,6 +185,7 @@ end
 
 function Data:RecordMiss(sourceName, targetName, spellName, avoidType, now)
   self:RecordCount("misses", "missSpells", sourceName, targetName, spellName, spellName, nil, 1, now)
+  if self:IsSummon(targetName) then return end
   self:RecordCount("avoids", "avoidSpells", targetName, sourceName, avoidType, avoidType, nil, 1, now)
 end
 
