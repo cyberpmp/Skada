@@ -21,7 +21,14 @@ local Nampower = {
   reason = "not probed",
   eventCount = 0,
   unresolvedGUIDCount = 0,
+  spellGoCount = 0,
+  -- The last few damage sources the ingest could not credit, for
+  -- /skada status. Each note records what the client could say about the
+  -- source at the moment its packet arrived, so a report from a player can
+  -- show whether a summon was nameless, ownerless, or owned by a stranger.
+  droppedSources = {},
 }
+local DROPPED_SOURCE_LIMIT = 5
 Skada.Nampower = Nampower
 
 local type = type
@@ -136,16 +143,93 @@ local function isRealGUID(guid)
   return type(guid) == "string" and guid ~= "" and guid ~= EMPTY_GUID
 end
 
+-- The GUID that summoned or created a unit, read off the unit's own fields
+-- while the client still holds it. Each accessor is probed rather than
+-- assumed: GetUnitField raises on a field name an older Nampower does not
+-- know, and the "<guid>owner" token is the fallback for builds without it.
+local function summonerGUID(guid)
+  if type(GetUnitField) == "function" then
+    local ok, owner = pcall(GetUnitField, guid, "summonedBy")
+    if ok and isRealGUID(owner) then return owner end
+    ok, owner = pcall(GetUnitField, guid, "createdBy")
+    if ok and isRealGUID(owner) then return owner end
+  end
+  if type(GetUnitGUID) == "function" then
+    local ok, owner = pcall(GetUnitGUID, guid .. "owner")
+    if ok and isRealGUID(owner) then return owner end
+  end
+end
+
+-- A unit seen for the first time may be somebody's summon. Totems are the
+-- case that matters: a Fire Nova Totem casts once and despawns, and by the
+-- time its damage packets are read the client has dropped the object, so
+-- the owner has to be learned from the SPELL_GO that precedes them. A summon
+-- whose owner is in the group becomes an owned identity; a stranger's stays
+-- an anonymous name and is dropped like any other outsider.
+-- A "no owner" answer is not trusted at first. The first packet naming a
+-- fresh totem (its spell-go) can arrive before the client has the unit's
+-- fields, and a summoner read then comes back empty; the damage packets in
+-- the same instant would read it fine. In the field, "live yes, owner
+-- <player> (in group)" was printed for hits that had been dropped on that
+-- cached miss. So the first SUMMON_RETRIES misses are re-read on the very
+-- next packet, and only after that is a miss held for SUMMON_RECHECK
+-- seconds, which keeps ordinary mobs from being re-read on every hit. The
+-- cache is per roster: RebuildRoster wipes every identity, summons included,
+-- so a live totem must be adopted again afterwards. Bounded like the name
+-- cache.
+local SUMMON_RETRIES = 3
+local SUMMON_RECHECK = 3
+local summonMissesByGUID = {}
+local summonCheckedByGUID = {}
+local summonCheckedCount = 0
+local summonCheckedGeneration
+
+local function adoptSummon(guid, name)
+  local generation = Skada.Data.rosterGeneration
+  if summonCheckedGeneration ~= generation or summonCheckedCount >= NAME_CACHE_LIMIT then
+    summonMissesByGUID = {}
+    summonCheckedByGUID = {}
+    summonCheckedCount = 0
+    summonCheckedGeneration = generation
+  end
+  local now = GetTime()
+  local misses = summonMissesByGUID[guid]
+  if misses and misses >= SUMMON_RETRIES and now - summonCheckedByGUID[guid] < SUMMON_RECHECK then return end
+  if not misses then summonCheckedCount = summonCheckedCount + 1 end
+  summonMissesByGUID[guid] = (misses or 0) + 1
+  summonCheckedByGUID[guid] = now
+
+  local ownerGUID = summonerGUID(guid)
+  if not ownerGUID or ownerGUID == guid then return end
+  -- The unit fields and UnitGUID come from two client extensions that need
+  -- not print a GUID identically, so a miss on the GUID index falls back to
+  -- naming the owner and looking that up.
+  local ownerIdentity = Skada.Data:GetIdentityByGUID(ownerGUID)
+  if not ownerIdentity then
+    local ownerName = UnitName(ownerGUID)
+    ownerIdentity = ownerName and Skada.Data:GetIdentityByName(ownerName)
+  end
+  if not ownerIdentity or not ownerIdentity.interesting or ownerIdentity.owner then return end
+  Skada.Data:AddSummon(name, ownerIdentity.name, guid)
+end
+
 function Nampower:ResolveName(guid)
   if not isRealGUID(guid) then return nil end
 
+  -- A unit already indexed by GUID may still be an unowned summon: mobs
+  -- attack totems, so a totem lands on a token like "targettarget" and the
+  -- token observer files it as a plain, uninteresting unit before any of
+  -- its packets arrive. That entry must not stop the owner read, or the
+  -- totem's hits are dropped while its owner reads fine.
   local identity = Skada.Data:GetIdentityByGUID(guid)
   if identity and identity.name then
+    if not identity.interesting then adoptSummon(guid, identity.name) end
     return rememberName(guid, identity.name)
   end
 
   local name = UnitName(guid)
   if type(name) == "string" and name ~= "" and name ~= "Unknown" then
+    adoptSummon(guid, name)
     return rememberName(guid, name)
   end
 
@@ -225,10 +309,39 @@ local function recordDamage(sourceGUID, targetGUID, amount, spellName, spellID, 
   amount = tonumber(amount) or 0
   local sourceName = resolveName(sourceGUID)
   local targetName = resolveName(targetGUID)
+  if not sourceName then
+    local totemName = Nampower:OwnTotemFor(spellName, GetTime())
+    if totemName then
+      sourceName = totemName
+      Skada.Data:AddSummon(totemName, Skada.Data:GetPlayerName(), sourceGUID)
+    end
+  end
   if not sourceName and not targetName then return end
 
-  Skada.Data:RecordDamage(sourceName, targetName, amount, spellName, spellID,
+  local recorded = Skada.Data:RecordDamage(sourceName, targetName, amount, spellName, spellID,
     school or "Physical", critical, GetTime(), mitigationType, mitigationAmount, targetGUID)
+  if not recorded and amount > 0 and isRealGUID(sourceGUID) then
+    Nampower:NoteDroppedSource(sourceGUID, sourceName, spellName or spellID)
+  end
+end
+
+local function describeGUID(guid)
+  if not isRealGUID(guid) then return "none" end
+  local name = UnitName(guid)
+  if type(name) == "string" and name ~= "" then return name end
+  return guid
+end
+
+function Nampower:NoteDroppedSource(guid, name, spellName)
+  local notes = self.droppedSources
+  local summoner = summonerGUID(guid)
+  local owner = summoner and describeGUID(summoner) or "none"
+  if summoner and Skada.Data:GetIdentityByGUID(summoner) then owner = owner .. " (in group)" end
+  local text = (name or "unnamed") .. " [" .. guid .. "] " .. tostring(spellName or "?") ..
+    ", live " .. (UnitName(guid) and "yes" or "no") .. ", owner " .. owner
+  if notes[table.getn(notes)] == text then return end
+  table.insert(notes, text)
+  if table.getn(notes) > DROPPED_SOURCE_LIMIT then table.remove(notes, 1) end
 end
 
 local function recordAvoidance(sourceGUID, targetGUID, spellName, avoidanceType)
@@ -324,6 +437,43 @@ local function onDispel(casterGUID, targetGUID, spellID)
     tonumber(spellID), GetTime())
 end
 
+-- Every caster is named as soon as its spell goes off. Nothing is recorded
+-- here; the point is to read a summon's name and owner while it still exists,
+-- so the damage packets that follow can be attributed after it despawns.
+local function onSpellGo(itemID, spellID, casterGUID)
+  Nampower.spellGoCount = Nampower.spellGoCount + 1
+  resolveName(casterGUID)
+end
+
+-- Totems the player has just dropped, by the spell they will cast, for the
+-- case the unit fields cannot cover: a totem the client never names, at
+-- spell-go or at damage time. "Fire Nova Totem" is expected to deal "Fire
+-- Nova"; "Magma Totem" deals "Magma Totem"; "Searing Totem" swings "Attack".
+-- An unnamed caster dealing one of those within the window is credited to the
+-- player as that totem. A named caster never comes through here, so a
+-- stranger's totem the client can see is never taken.
+local TOTEM_WINDOW = 12
+local ownTotemBySpell = {}
+
+local function rememberOwnTotem(spellName, now)
+  if type(spellName) ~= "string" or not string.find(spellName, " Totem$") then return end
+  ownTotemBySpell[spellName] = { totem = spellName, time = now }
+  local novaName = string.gsub(spellName, " Totem$", "")
+  ownTotemBySpell[novaName] = { totem = spellName, time = now }
+  ownTotemBySpell["Attack"] = { totem = spellName, time = now }
+end
+
+function Nampower:OwnTotemFor(spellName, now)
+  local expected = spellName and ownTotemBySpell[spellName]
+  if not expected or now - expected.time > TOTEM_WINDOW then return nil end
+  return expected.totem
+end
+
+local function onSpellGoSelf(itemID, spellID)
+  Nampower.spellGoCount = Nampower.spellGoCount + 1
+  rememberOwnTotem(resolveSpellName(spellID), GetTime())
+end
+
 local function onUnitDied(guid)
   local targetName = resolveName(guid)
   if not targetName then return end
@@ -361,6 +511,8 @@ local handlers = {
   DAMAGE_SHIELD_OTHER = onDamageShield,
   SPELL_DISPEL_BY_SELF = onDispel,
   SPELL_DISPEL_BY_OTHER = onDispel,
+  SPELL_GO_SELF = onSpellGoSelf,
+  SPELL_GO_OTHER = onSpellGo,
   UNIT_DIED = onUnitDied,
 }
 
@@ -478,7 +630,23 @@ end
 function Nampower:GetStatusText()
   if not self.available then return "chat text (" .. self.reason .. ")" end
   if not self.active then return "chat text (Nampower off)" end
-  return "Nampower events (" .. self.eventCount .. " seen)"
+  return "Nampower events (" .. self.eventCount .. " seen, " .. self.spellGoCount ..
+    " spell-go, " .. self.unresolvedGUIDCount .. " unresolved)"
+end
+
+-- Prints the dropped-source notes, most recent last, or one line saying
+-- there are none. Called by /skada status.
+function Nampower:PrintDroppedSources()
+  local notes = self.droppedSources
+  if table.getn(notes) == 0 then
+    Skada:Print("No uncredited damage sources seen.")
+    return
+  end
+  Skada:Print("Uncredited damage sources (last " .. table.getn(notes) .. "):")
+  local noteIndex
+  for noteIndex = 1, table.getn(notes) do
+    Skada:Print("  " .. notes[noteIndex])
+  end
 end
 
 resolveName = function(guid) return Nampower:ResolveName(guid) end

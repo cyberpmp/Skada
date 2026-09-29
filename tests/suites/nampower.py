@@ -179,6 +179,24 @@ def run(ctx: Context):
       assert(alice.dispels == 1, "a dispel was not recorded")
       assert(alice.dispelSpells["Dispel Magic"], "the dispelled spell ID was not named")
 
+      -- The aura-snapshot route (a buff missing from the target after the
+      -- cast) must stay silent while the packet is authoritative, or the
+      -- same dispel is counted once by each. Drive the snapshot path the way
+      -- a real cast does and fake the target's auras vanishing.
+      local Tracking = Skada.Tracking
+      local savedSnapshot = Tracking.SnapshotAuras
+      local auraGone = false
+      Tracking.SnapshotAuras = function() if auraGone then return {} end return { [8092] = "Mind Blast" } end
+      Tracking:OnSpellSent("player", "target", "cast-dispel-np", 527, "Dispel Magic")
+      Tracking:OnSpellSucceeded("player", "cast-dispel-np", 527, "Dispel Magic")
+      assert(table.getn(Tracking.pendingDispels) == 0,
+        "a pending snapshot dispel was opened while Nampower owns dispels")
+      fire("SPELL_DISPEL_BY_SELF", "0xA", "0xC", 8092)
+      auraGone = true
+      Tracking:OnUnitAura("target")
+      Tracking.SnapshotAuras = savedSnapshot
+      assert(alice.dispels == 2, "a dispel was counted twice under Nampower: " .. tostring(alice.dispels))
+
       -- Deaths ---------------------------------------------------------------
 
       fire("UNIT_DIED", "0xA")
@@ -212,6 +230,136 @@ def run(ctx: Context):
       fire("SPELL_DAMAGE_EVENT_OTHER", "0xC", "0xNOPE", 22703, 255, "0,0,0", 0, 2, "2,0,0,0")
       assert(alice.damage == damageBefore,
         "an unnamed caster's damage was credited to the player")
+
+      -- The dropped hit is noted for /skada status with everything the client
+      -- could say about the source, so a player's report shows why.
+      local lastNote = Nampower.droppedSources[table.getn(Nampower.droppedSources)]
+      assert(lastNote and string.find(lastNote, "0xNOPE", 1, true) and string.find(lastNote, "live no", 1, true),
+        "an uncredited source was not noted for status: " .. tostring(lastNote))
+
+      -- Summons -----------------------------------------------------------------
+
+      -- A Fire Nova Totem casts once and despawns before its damage packets
+      -- are read. The SPELL_GO that precedes them is the only moment the
+      -- client can still name the totem and its summoner, so the ingest must
+      -- learn the owner there and credit the hits afterwards.
+      TestRegisterGUIDUnit("0xT1", "Fire Nova Totem IV", "WARRIOR", true, 5, 5)
+      TestSetUnitSummoner("0xT1", "0xA")
+      fire("SPELL_GO_OTHER", 0, 11970, "0xT1", "0x0000000000000000", 0, 3, 0)
+      TestUnregisterGUIDUnit("0xT1")
+      assert(UnitName("0xT1") == nil, "the despawned totem is still resolvable")
+      fire("SPELL_DAMAGE_EVENT_OTHER", "0xC", "0xT1", 11970, 180, "0,0,0", 0, 4, "2,0,0,0")
+      assert(alice.damage == damageBefore + 180,
+        "the player's totem damage was not merged into the player: " .. tostring(alice.damage))
+      local totemSpell = alice.damageSpells["[Fire Nova Totem IV] Fire Nova"]
+      assert(totemSpell and totemSpell.amount == 180,
+        "totem damage was not listed under the totem's name on the owner")
+      damageBefore = alice.damage
+
+      -- Mobs attack totems, so a totem is often on a unit token
+      -- ("targettarget") and filed by the token observer as a plain unit
+      -- before any of its packets arrive. In the field every nova was dropped
+      -- this way while status printed "live yes, owner <player> (in group)".
+      TestSetTarget("Fire Nova Totem VI", "0xT6")
+      TestSetUnitSummoner("0xT6", "0xA")
+      Skada.Data:ObserveToken("target")
+      local observed = Skada.Data:GetIdentityByGUID("0xT6")
+      assert(observed and not observed.interesting, "the observed totem should start as a plain unit")
+      TestSetTarget("Boar", "0xC")
+      TestRegisterGUIDUnit("0xT6", "Fire Nova Totem VI", "WARRIOR", true, 5, 5)
+      fire("SPELL_DAMAGE_EVENT_OTHER", "0xC", "0xT6", 11970, 75, "0,0,0", 0, 4, "2,0,0,0")
+      assert(alice.damage == damageBefore + 75,
+        "a totem already observed on a token was never adopted: " .. tostring(alice.damage))
+      assert(alice.damageSpells["[Fire Nova Totem VI] Fire Nova"],
+        "the token-observed totem was not merged under its name")
+      damageBefore = alice.damage
+
+      -- The owner field can be empty on the very first packet that names a
+      -- fresh totem and readable a moment later. That first miss must not be
+      -- remembered for the totem's life: in the field, "live yes, owner
+      -- <player> (in group)" was printed for hits that were still dropped.
+      TestRegisterGUIDUnit("0xT5", "Fire Nova Totem V", "WARRIOR", true, 5, 5)
+      fire("SPELL_GO_OTHER", 0, 11970, "0xT5", "0x0000000000000000", 0, 3, 0)
+      TestSetUnitSummoner("0xT5", "0xA")
+      -- The nova lands in the same instant as its spell-go.
+      fire("SPELL_DAMAGE_EVENT_OTHER", "0xC", "0xT5", 11970, 60, "0,0,0", 0, 4, "2,0,0,0")
+      assert(alice.damage == damageBefore + 60,
+        "an owner field that missed at spell-go was not re-read on the damage packet: " .. tostring(alice.damage))
+      damageBefore = alice.damage
+
+      -- An ordinary mob with no summoner is re-read a few times, then held
+      -- for a while rather than read on every hit.
+      local savedField = GetUnitField
+      local fieldReads = 0
+      GetUnitField = function(unit, fieldName) fieldReads = fieldReads + 1 return savedField(unit, fieldName) end
+      TestRegisterGUIDUnit("0xM", "Wolf Pup", "WARRIOR", false, 100, 100)
+      local hitIndex
+      for hitIndex = 1, 6 do
+        fire("SPELL_DAMAGE_EVENT_OTHER", "0xA", "0xM", 8092, 1, "0,0,0", 0, 5, "2,0,0,0")
+      end
+      GetUnitField = savedField
+      assert(fieldReads == 6, "a summoner miss was held before three retries: " .. fieldReads)
+      TestSetUnitHealth("0xA", 1000, 1000)
+
+      -- The client may never name the totem at all, neither at spell-go nor
+      -- at damage time. The player's own spell-go for "Fire Nova Totem" then
+      -- vouches for an unnamed caster dealing "Fire Nova" shortly after.
+      fire("SPELL_GO_SELF", 0, 1535, "0xA", "0x0000000000000000", 0, 0, 0)
+      fire("SPELL_DAMAGE_EVENT_OTHER", "0xC", "0xGHOST", 11970, 90, "0,0,0", 0, 4, "2,0,0,0")
+      assert(alice.damage == damageBefore + 90,
+        "an unnamed totem's nova after the player's own totem cast was not credited: " .. tostring(alice.damage))
+      assert(alice.damageSpells["[Fire Nova Totem] Fire Nova"],
+        "the vouched-for nova was not listed under the totem the player cast")
+      damageBefore = alice.damage
+      -- The vouching expires: an unnamed nova long after the cast stays dropped.
+      TestSetTime(GetTime() + 30)
+      fire("SPELL_DAMAGE_EVENT_OTHER", "0xC", "0xGHOST2", 11970, 90, "0,0,0", 0, 4, "2,0,0,0")
+      assert(alice.damage == damageBefore, "a stale totem cast vouched for an unnamed caster")
+
+      -- A stranger's summon stays a stranger: its owner is not in the group,
+      -- so it is neither credited to the player nor given a bar of its own.
+      TestRegisterGUIDUnit("0xT2", "Infernal", "WARRIOR", false, 500, 500)
+      TestSetUnitSummoner("0xT2", "0xSTRANGER")
+      fire("SPELL_GO_OTHER", 0, 22703, "0xT2", "0x0000000000000000", 0, 1, 0)
+      fire("SPELL_DAMAGE_EVENT_OTHER", "0xC", "0xT2", 22703, 255, "0,0,0", 0, 2, "2,0,0,0")
+      assert(alice.damage == damageBefore,
+        "a stranger's summon was credited to the player")
+      assert(not current.actors["Infernal"],
+        "a stranger's summon became an actor with trackAll off")
+
+      -- A groupmate's summon merges into the groupmate, not the player. Here
+      -- the totem is still alive when its damage lands, so no SPELL_GO is
+      -- needed: the first damage packet reads the summoner itself.
+      TestRegisterGUIDUnit("0xT3", "Shadowfiend", "WARRIOR", true, 50, 50)
+      TestSetUnitSummoner("0xT3", "0xB")
+      fire("SPELL_DAMAGE_EVENT_OTHER", "0xC", "0xT3", 8092, 70, "0,0,0", 0, 5, "2,0,0,0")
+      assert(alice.damage == damageBefore, "a groupmate's summon was credited to the player")
+      assert(bob.damageSpells["[Shadowfiend] Mind Blast"] and bob.damageSpells["[Shadowfiend] Mind Blast"].amount == 70,
+        "a groupmate's summon was not merged into the groupmate")
+
+      -- A roster rebuild mid-fight (a groupmate resummons a pet, someone
+      -- joins) wipes every identity, summons included. A summon still alive
+      -- must be adopted again on its next packet rather than trusting a
+      -- cached "already checked" answer from the old roster.
+      Skada.Data:RebuildRoster()
+      assert(not Skada.Data:GetIdentityByGUID("0xT3"), "the rebuild kept the summon identity")
+      fire("SPELL_DAMAGE_EVENT_OTHER", "0xC", "0xT3", 8092, 30, "0,0,0", 0, 5, "2,0,0,0")
+      bob = current.actors["Bob"]
+      assert(bob.damageSpells["[Shadowfiend] Mind Blast"].amount == 100,
+        "a live summon was not re-adopted after a roster rebuild: " .. tostring(bob.damageSpells["[Shadowfiend] Mind Blast"].amount))
+
+      -- The summoner field and UnitGUID come from different client
+      -- extensions. When the owner GUID misses the roster index, the owner
+      -- is named and looked up instead of being written off.
+      TestRegisterGUIDUnit("0xa", "Alice", "MAGE", true, 1000, 1000)
+      TestRegisterGUIDUnit("0xT4", "Magma Totem", "WARRIOR", true, 5, 5)
+      TestSetUnitSummoner("0xT4", "0xa")
+      fire("SPELL_DAMAGE_EVENT_OTHER", "0xC", "0xT4", 133, 40, "0,0,0", 0, 2, "2,0,0,0")
+      alice = current.actors["Alice"]
+      assert(alice.damageSpells["[Magma Totem] Fireball"] and alice.damageSpells["[Magma Totem] Fireball"].amount == 40,
+        "an owner GUID in a different spelling was not resolved by name")
+      TestUnregisterGUIDUnit("0xa")
+      damageBefore = alice.damage
 
       -- Disabling restores the chat path ---------------------------------------
 

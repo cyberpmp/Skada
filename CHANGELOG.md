@@ -4,6 +4,43 @@ All notable changes to the PMP Skada rewrite are documented here.
 
 ## Unreleased
 
+## 2.0.4 - 2026-09-29
+
+### Fixed
+
+- Damage from your totems and other tokenless summons (Fire Nova Totem, Magma
+  Totem, Searing Totem) is credited to you again with Nampower on. Before
+  2.0.3 it was credited only by accident: a Fire Nova Totem despawns before
+  its damage packets are read, the client could no longer name it, and the
+  blank name fell through to the player. 2.0.3 closed that hole because it
+  also credited strangers' summons to you, which took the totems with it.
+  The ingest now reads a summon's owner off the unit while it still exists
+  (the spell-go packet that precedes the damage) and merges its hits into the
+  owner like a pet, so the rows read "[Fire Nova Totem IV] Fire Nova". A
+  groupmate's summon merges into the groupmate; a stranger's stays dropped.
+  Chat-text mode (Nampower off) has no unit to read and cannot attribute
+  totems, as before.
+- Dispels were counted twice with Nampower on. The packet recorded one, and
+  the aura-snapshot route that exists for chat-text mode (a buff missing from
+  the target after your cast) recorded it again; only the chat "is removed"
+  line had been silenced. The snapshot route now stays quiet whenever the
+  packet is authoritative. Abolish Poison still counts every tick that
+  removes a poison, since each is a real dispel.
+- A Fire Nova Totem the client never names, at its spell-go or at damage
+  time, is still credited to you: your own spell-go for a "... Totem" spell
+  vouches for an unnamed caster dealing that totem's spell within 12 seconds
+  ("Fire Nova Totem" for "Fire Nova", "Magma Totem" for "Magma Totem",
+  "Searing Totem" for "Attack"). A caster the client can name never goes
+  through this, so a stranger's visible totem is never taken.
+
+### Added
+
+- `/skada status` now reports spell-go and unresolved-GUID counts and lists
+  the last five damage sources the Nampower ingest could not credit, with
+  the source's name or GUID, the spell, whether the unit was still live, and
+  what the client said about its owner. Send that output with a report of
+  missing damage.
+
 ## 2.0.3 - 2026-09-28
 
 ### Added

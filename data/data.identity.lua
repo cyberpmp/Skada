@@ -74,11 +74,38 @@ function DataIdentity:AddGroupUnit(unit)
   end
 end
 
+-- A summon the roster cannot see: a totem, a warlock's Infernal, a
+-- Feral Spirit. Group pets sit on a pet token and come in through
+-- AddGroupUnit; everything else has no token, so the Nampower ingest reports
+-- it here once it has read the summoner off the unit's fields. The summon
+-- becomes an owned identity, and ResolveSource merges its hits into the owner
+-- like any pet. Same-named summons of two owners share one entry, so the
+-- most recent owner wins; keyed by name, there is nowhere else to put it.
+function DataIdentity:AddSummon(name, ownerName, guid)
+  if not name or name == "" or not ownerName then return end
+  local ownerIdentity = self.identitiesByName[ownerName]
+  if not ownerIdentity or not ownerIdentity.interesting then return end
+
+  local identity = self.identitiesByName[name]
+  if not identity then
+    identity = { name = name, class = "OTHER" }
+    self.identitiesByName[name] = identity
+  end
+  identity.owner = ownerName
+  identity.interesting = true
+  identity.guid = guid or identity.guid
+  if guid then self.identitiesByGUID[guid] = identity end
+  return identity
+end
+
 function DataIdentity:RebuildRoster()
   wipeTable(self.identitiesByName)
   wipeTable(self.identitiesByGUID)
   wipeTable(self.unitsByName)
   wipeTable(self.groupTokens)
+  -- Bumped on every rebuild so callers that cache "this GUID has been
+  -- checked for an owner" know their answer was wiped with the roster.
+  self.rosterGeneration = (self.rosterGeneration or 0) + 1
 
   self:AddGroupUnit("player")
 

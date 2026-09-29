@@ -66,6 +66,7 @@ registerSlashCommand({ name = "status", handler = function()
     ", damage " .. Skada:FormatNumber(currentSegment.damage) ..
     ", parser misses " .. tostring(Skada.Parser:GetMissCount()) ..
     ", source " .. Skada.Nampower:GetStatusText() .. ".")
+  if Skada.Nampower.active then Skada.Nampower:PrintDroppedSources() end
 end })
 
 registerSlashCommand({ name = "help", handler = printHelp })

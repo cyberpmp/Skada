@@ -32,6 +32,7 @@ the ingest off and every flag clears, restoring the chat path exactly.
 | Misses and avoidance | `SPELL_MISS_SELF` / `_OTHER`, auto-attack victim state | `Data:RecordMiss` |
 | Dispels | `SPELL_DISPEL_BY_SELF` / `_BY_OTHER` | `Data:RecordDispel` |
 | Deaths | `UNIT_DIED` | `Data:RecordDeath` |
+| Summon ownership | `SPELL_GO_OTHER`, `GetUnitField(guid, "summonedBy")` | `Data:AddSummon` |
 
 ### What each event buys us over the chat line
 
@@ -49,6 +50,19 @@ the ingest off and every flag clears, restoring the chat path exactly.
   `Data:EstimateHealing` reads that exact unit's health instead of resolving a
   name to a unit token that may not exist. Heals on units outside the group's
   tokens are now verified rather than assumed fully effective.
+- **Totems and other tokenless summons.** Group pets sit on a pet token; a
+  totem, an Infernal or a Feral Spirit does not. The ingest reads a new unit's
+  `summonedBy` (then `createdBy`, then the `<guid>owner` token) the first time
+  it names it, and when the summoner is a group member the summon becomes an
+  owned identity that `mergePets` folds into the owner. `SPELL_GO_OTHER` is
+  registered only to trigger that read: a Fire Nova Totem despawns before its
+  damage packets arrive, so the spell-go is the last moment the client can
+  still name it. Chat-text mode has no GUID and cannot do this.
+  When the client cannot name the totem at all, the player's own
+  `SPELL_GO_SELF` for a "... Totem" spell vouches for an unnamed caster
+  dealing that totem's spell within 12 seconds. `/skada status` lists the
+  last few sources that could not be credited, with what the client could
+  say about each.
 - **Glancing and crushing blows** arrive as hit-info flags rather than a
   parenthesized suffix that only exists in English.
 

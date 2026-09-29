@@ -25,6 +25,7 @@ local recordDurationSet = DataAggregator.RecordDurationSet
 
 Data.AddObservedUnit = DataIdentity.AddObservedUnit
 Data.AddGroupUnit = DataIdentity.AddGroupUnit
+Data.AddSummon = DataIdentity.AddSummon
 Data.RebuildRoster = DataIdentity.RebuildRoster
 Data.ObserveToken = DataIdentity.ObserveToken
 Data.FindUnitByName = DataIdentity.FindUnitByName

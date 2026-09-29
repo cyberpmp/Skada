@@ -22,9 +22,19 @@ local dispelCasts = {
   [19801] = 1,
 }
 
+-- The aura-snapshot route infers a dispel from a buff that vanished after
+-- the cast. It exists for chat-text mode, where no line names the dispel.
+-- With Nampower authoritative, SPELL_DISPEL_BY_* already records each one,
+-- and the parser's "is removed" route is silenced for that reason; the
+-- snapshot must fall silent with it, or every dispel counts twice.
+local function dispelsSuppressed()
+  local parser = Skada.Parser
+  return parser and parser:IsFactSuppressed("dispel") or false
+end
+
 function CastTracker:NewDispelPending(sourceName, targetName, abilityName, spellID, before, now)
   local maximum = dispelCasts[spellID]
-  if not maximum then return end
+  if not maximum or dispelsSuppressed() then return end
   local targetUnit = self:FindTargetUnit(targetName)
   local targetGUID = targetUnit and UnitGUID(targetUnit) or nil
   local friendly = targetUnit and UnitIsFriend("player", targetUnit) and true or false
@@ -130,7 +140,7 @@ function CastTracker:OnSpellSent(unit, target, castGUID, spellID, spellName)
     targetName = UnitName(targetName) or targetName
   end
   local before
-  if dispelCasts[spellID] then
+  if dispelCasts[spellID] and not dispelsSuppressed() then
     local targetUnit = self:FindTargetUnit(targetName)
     if targetUnit then
       local friendly = UnitIsFriend("player", targetUnit) and true or false

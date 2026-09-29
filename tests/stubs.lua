@@ -73,9 +73,27 @@ function TestRegisterGUIDUnit(guid, name, class, friend, health, maximum)
   }
 end
 
+function TestUnregisterGUIDUnit(guid)
+  unitsByGUID[guid] = nil
+end
+
 local function resolveUnit(unit)
   indexUnitsByGUID()
   return units[unit] or unitsByGUID[unit]
+end
+
+-- Nampower's unit-field reader, for the summoner fields the ingest uses to
+-- tie a totem to its owner. Like the client it returns nil once the object
+-- is gone and raises on a field name it does not know.
+local summonerByGUID = {}
+function TestSetUnitSummoner(guid, ownerGUID) summonerByGUID[guid] = ownerGUID end
+function GetUnitField(unit, fieldName)
+  if fieldName ~= "summonedBy" and fieldName ~= "createdBy" then
+    error("unknown unit field " .. tostring(fieldName))
+  end
+  local value = resolveUnit(unit)
+  if not value then return nil end
+  return summonerByGUID[value.guid] or "0x0000000000000000"
 end
 
 function UnitExists(unit) return resolveUnit(unit) ~= nil end
@@ -110,6 +128,7 @@ local nampowerPresent = true
 local spellNames = {
   [116] = "Frostbolt", [133] = "Fireball", [2050] = "Lesser Heal",
   [8092] = "Mind Blast", [5782] = "Fear", [527] = "Dispel Magic",
+  [11970] = "Fire Nova", [1535] = "Fire Nova Totem",
 }
 function TestSetNampowerPresent(value)
   nampowerPresent = value and true or false
