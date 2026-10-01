@@ -39,6 +39,9 @@ Style.MUTED_R, Style.MUTED_G, Style.MUTED_B = 0.60, 0.63, 0.69
 Style.UI_ACCENT_R, Style.UI_ACCENT_G, Style.UI_ACCENT_B = 0.38, 0.61, 0.80
 Style.PANE_BG_R, Style.PANE_BG_G, Style.PANE_BG_B, Style.PANE_BG_A = 0.1, 0.1, 0.1, 0.5
 Style.PANE_BORDER_R, Style.PANE_BORDER_G, Style.PANE_BORDER_B = 0.4, 0.4, 0.4
+-- Hairlines inside the settings dialog: the sidebar divider and the rule a
+-- section heading trails off into. Muted so they organise without framing.
+Style.RULE_R, Style.RULE_G, Style.RULE_B, Style.RULE_A = 0.55, 0.50, 0.38, 0.45
 Style.GOLD_R, Style.GOLD_G, Style.GOLD_B = 1, 0.82, 0
 Style.GOLD_BRIGHT_R, Style.GOLD_BRIGHT_G, Style.GOLD_BRIGHT_B = 1, 0.9, 0.2
 
@@ -69,8 +72,8 @@ Style.MENU_BACKDROP = {
 
 -- Classic control art, all from the client's own FrameXML templates: the
 -- quest-log row highlight, the check box with its glow and mark, the
--- dropdown frame and arrow, the input-box border, the chat color swatch,
--- the tooltip-border strip headings draw their lines from, and the panel X.
+-- dropdown frame and arrow, the input-box border, the chat color swatch
+-- and the panel X.
 Style.ROW_HIGHLIGHT_TEXTURE = "Interface\\QuestFrame\\UI-QuestTitleHighlight"
 Style.CHECK_BOX_TEXTURE = "Interface\\Buttons\\UI-CheckBox-Up"
 Style.CHECK_BOX_HIGHLIGHT_TEXTURE = "Interface\\Buttons\\UI-CheckBox-Highlight"
@@ -81,7 +84,6 @@ Style.DROPDOWN_ARROW_PUSHED_TEXTURE = "Interface\\ChatFrame\\UI-ChatIcon-ScrollD
 Style.MOUSE_HIGHLIGHT_TEXTURE = "Interface\\Buttons\\UI-Common-MouseHilight"
 Style.INPUT_BORDER_TEXTURE = "Interface\\Common\\Common-Input-Border"
 Style.COLOR_SWATCH_TEXTURE = "Interface\\ChatFrame\\ChatFrameColorSwatch"
-Style.HEADING_LINE_TEXTURE = "Interface\\Tooltips\\UI-Tooltip-Border"
 Style.CLOSE_BUTTON_TEXTURE = "Interface\\Buttons\\UI-Panel-MinimizeButton-Up"
 Style.CLOSE_BUTTON_PUSHED_TEXTURE = "Interface\\Buttons\\UI-Panel-MinimizeButton-Down"
 Style.CLOSE_BUTTON_HIGHLIGHT_TEXTURE = "Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight"
@@ -419,9 +421,14 @@ function Style:ApplyMeterBorder(frame, visible, red, green, blue)
   end
 end
 
+-- The window border style in effect: "solid", "shadow" or "none".
+function Style:GetWindowBorderStyle()
+  return Skada.db.profile.windowBorderStyle or "solid"
+end
+
 function Style:ApplyMeterWindow(frame, active, opacity)
   local profile = Skada.db.profile
-  local borderStyle = profile.hideWindowBorder and "none" or profile.windowBorderStyle or "solid"
+  local borderStyle = self:GetWindowBorderStyle()
   local hideBorder = borderStyle == "none"
   local color = profile.windowBorderColor or { 0.10, 0.11, 0.14 }
   local borderR, borderG, borderB = color[1] or 0.10, color[2] or 0.11, color[3] or 0.14
@@ -435,27 +442,12 @@ function Style:ApplyMeterWindow(frame, active, opacity)
   self:ApplyShadow(frame, borderStyle == "shadow")
 end
 
+-- The title row has no background of its own (the window backdrop is the
+-- only one); the header's whole state is the title's text tone, brighter
+-- while the window is selected in settings.
 function Style:ApplyHeader(window)
-  if not window or not window.headerTexture then return end
-  local profile = Skada.db.profile
+  if not window or not window.header then return end
   local active = window.manager and window.manager.visualActive == window
-  local red, green, blue = 0.055, 0.060, 0.075
-  if active then red, green, blue = 0.072, 0.078, 0.098 end
-  if profile.classColorMenus then
-    local accentRed, accentGreen, accentBlue = self:GetAccentColor()
-    local strength = active and 0.18 or 0.11
-    red, green, blue = red + accentRed * strength, green + accentGreen * strength, blue + accentBlue * strength
-  end
-  local opacity = self:GetWindowOpacity(window.db)
-  window.headerTexture:SetTexture(self.WHITE)
-  window.headerTexture:SetVertexColor(red, green, blue)
-  window.headerTexture:SetAlpha(0.92 * opacity)
-  if window.headerRule then
-    local ruleRed, ruleGreen, ruleBlue = 0.34, 0.38, 0.47
-    if active and profile.classColorMenus then ruleRed, ruleGreen, ruleBlue = self:GetAccentColor() end
-    window.headerRule:SetVertexColor(ruleRed, ruleGreen, ruleBlue)
-    window.headerRule:SetAlpha((active and 0.52 or 0.20) * opacity)
-  end
   if window.title then
     if active then
       window.title:SetTextColor(0.94, 0.95, 0.98, 1)

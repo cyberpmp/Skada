@@ -21,17 +21,6 @@ local function getActiveWindow()
   return Skada.UI and Skada.UI:GetActive()
 end
 
-local function setWindowVisibility(visible, window)
-  if not window then return end
-  window.db.visible = visible and true or false
-  if window.frame then
-    if visible then window.frame:Show() else window.frame:Hide() end
-  end
-  window.layoutDirty = true
-  Skada.UI:SyncLegacy(window)
-  Skada:MarkDirty()
-end
-
 local function printHelp()
   Skada:Print("/skada (or /skada config) opens the settings panel.")
   Skada:Print("  /skada reset")
@@ -55,7 +44,7 @@ registerSlashCommand({ name = "center", handler = function()
   if not window then return end
   window.db.point, window.db.relativePoint = "CENTER", "CENTER"
   window.db.x, window.db.y = 0, 0
-  setWindowVisibility(true, window)
+  Skada.UI:SetWindowVisible(window, true)
   window:ApplyLayout()
   Skada:Print("Window " .. window.db.id .. " centered.")
 end })

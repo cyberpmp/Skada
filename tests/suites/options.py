@@ -141,10 +141,10 @@ def run(ctx: Context):
         return checked
       end
       local framesChecked = checkSubtree(dialog, 0)
-      assert(framesChecked > 30, "dialog subtree walk found only " .. framesChecked .. " frames")
+      assert(framesChecked > 20, "dialog subtree walk found only " .. framesChecked .. " frames")
 
       -- Chrome: the default UI's own dialog-box frame, untinted (no black
-      -- wash, no drop shadow), tooltip-bordered inset panes, the header
+      -- wash, no drop shadow), no inset panes inside it, the header
       -- ribbon's gold title, a red panel Close button and the round X.
       local Style = Skada.UIStyle
       assert(dialog.backdrop == Style.DIALOG_BACKDROP and dialog.backdropR == 1
@@ -152,49 +152,87 @@ def run(ctx: Context):
       assert(rawget(dialog, "skadaShadow") == nil, "classic chrome draws no drop shadow")
       assert(dialog.dialogTitle.textValue == "Skada" and dialog.dialogTitle.textR == Style.GOLD_R,
         "dialog must carry the gold header-ribbon title")
-      assert(dialog.sidebar.backdrop == Style.PANE_BACKDROP
-        and dialog.pane.backdrop == Style.PANE_BACKDROP,
-        "sidebar and pane must be tooltip-bordered insets")
+      -- One surface inside the frame: no inset boxes around the sidebar or
+      -- the page, just a hairline between them.
+      assert(dialog.sidebar.backdrop == nil and dialog.pane.backdrop == nil,
+        "sidebar and pane must not be boxed")
+      assert(dialog.divider and dialog.divider.width == 1
+        and dialog.divider.vertexR == Style.RULE_R,
+        "the sidebar and page must be separated by a single hairline")
       assert(dialog.closeButton and dialog.closeButton.frameType == "Button"
         and dialog.closeButton.textValue == "Close",
         "dialog must carry a panel Close button")
       assert(dialog.closeX and rawget(dialog.closeX, "normalTexture") == Style.CLOSE_BUTTON_TEXTURE,
         "dialog must carry the round panel X")
+      assert(dialog.versionText and dialog.versionText.textValue == "Skada " .. Skada.version,
+        "dialog must show the addon version in its corner")
 
-      -- Sidebar: General row first, then the Windows header (a plain Frame,
-      -- so its label takes no clicks) with its plus button, then one row per
-      -- meter window.
+      -- Sidebar: the three profile pages first, then the Windows header (a
+      -- plain Frame, so its label takes no clicks) with its plus button,
+      -- then one row per meter window.
+      local PAGE_ROWS = 3
       local rows = dialog.sidebar.rows
-      assert(table.getn(rows) == 2 + table.getn(Skada.UI.windows),
-        "sidebar must hold General + the Windows header + one row per window, got "
+      assert(table.getn(rows) == PAGE_ROWS + 1 + table.getn(Skada.UI.windows),
+        "sidebar must hold the pages + the Windows header + one row per window, got "
         .. table.getn(rows))
-      assert(rows[1].text.textValue == "General", "first sidebar row must be General")
-      assert(rows[1].frameType == "Button", "the General row must be clickable")
-      assert(rows[1].marker:IsShown(), "the selected group's row must show its marker")
-      local headerRow = rows[2]
-      assert(headerRow.text.textValue == "Windows", "second sidebar row must be the Windows header")
+      assert(rows[1].text.textValue == "General" and rows[1].groupKey == "general",
+        "first sidebar row must be General")
+      assert(rows[2].text.textValue == "Appearance" and rows[2].groupKey == "appearance",
+        "second sidebar row must be Appearance")
+      assert(rows[3].text.textValue == "Data" and rows[3].groupKey == "data",
+        "third sidebar row must be Data")
+      local pageRowIndex
+      for pageRowIndex = 1, PAGE_ROWS do
+        assert(rows[pageRowIndex].frameType == "Button", "page rows must be clickable")
+        assert(rows[pageRowIndex].text.textR == Style.GOLD_R and rows[pageRowIndex].text.textG == Style.GOLD_G,
+          "page rows must read in gold")
+      end
+      assert(rows[1].marker:IsShown(), "the selected page's row must show its marker")
+      assert(not rows[2].marker:IsShown() and not rows[3].marker:IsShown(),
+        "unselected page rows must not light up")
+      local headerRow = rows[PAGE_ROWS + 1]
+      assert(headerRow.text.textValue == "Windows", "the Windows header must follow the pages")
       assert(headerRow.frameType ~= "Button", "the Windows header must not take clicks")
       local plus = headerRow.plusButton
       assert(plus and rawget(plus, "normalTexture") == "Interface\\Buttons\\UI-PlusButton-UP",
         "the Windows header must carry a plus button")
       local windowRowIndex
-      for windowRowIndex = 3, table.getn(rows) do
+      for windowRowIndex = PAGE_ROWS + 2, table.getn(rows) do
         assert(rows[windowRowIndex].frameType == "Button", "window rows must be clickable")
         -- Unselected window rows read in white; the selected row (General
         -- here) lights the quest-log highlight and turns gold.
         assert(not rows[windowRowIndex].marker:IsShown(), "unselected rows must not light up")
         assert(rows[windowRowIndex].text.textR == 1 and rows[windowRowIndex].text.textG == 1,
           "unselected window rows must read in white")
+        assert(rows[windowRowIndex].text.lastPointX == 20,
+          "window rows must sit indented under the Windows header")
       end
       assert(rows[1].marker.texture == Style.ROW_HIGHLIGHT_TEXTURE,
         "the selection marker must be the quest-log highlight")
-      assert(rows[1].text.textR == Style.GOLD_R and rows[1].text.textG == Style.GOLD_G,
-        "the General row must read in gold")
 
-      -- Pane: the General group renders every one of its rows as a control,
-      -- laid out arithmetically inside the scroll child.
-      assert(table.getn(dialog.controls) == 29,
+      -- Pane: every page opens with its title row, then renders each of its
+      -- schema rows as a control laid out arithmetically inside the scroll
+      -- child. General is the short page: tracking and client toggles.
+      local function pageTypes()
+        local counts = {}
+        local controlIndex, control
+        for controlIndex = 1, table.getn(dialog.controls) do
+          control = dialog.controls[controlIndex]
+          assert(control.spec and control.spec.type, "a pane control lost its spec reference")
+          counts[control.spec.type] = (counts[control.spec.type] or 0) + 1
+        end
+        return counts
+      end
+      local general = pageTypes()
+      assert(table.getn(dialog.controls) == 11,
         "General pane did not build every control: " .. table.getn(dialog.controls))
+      assert(general.title == 1 and general.header == 3 and general.toggle == 5 and general.range == 2,
+        "General must be a title, three headings, five toggles and the two snap sliders")
+      assert(not dialog.titleAction:IsShown(), "profile pages have no title-row action")
+      assert(dialog.controls[1].spec.type == "title" and dialog.controls[1].spec.name == "General"
+        and dialog.controls[1].label.textValue == "General"
+        and dialog.controls[1].description.textValue ~= nil,
+        "every page must open with its titled heading")
       assert(dialog.content:GetWidth() == 518,
         "scroll child must carry the arithmetic width, got " .. tostring(dialog.content:GetWidth()))
       assert(dialog.scrollframe:GetName() == "SkadaOptionsScrollFrame",
@@ -203,24 +241,105 @@ def run(ctx: Context):
         "the pane scroll frame must use its template's own scrollbar")
       assert(dialog.scrollframe:IsMouseWheelEnabled(),
         "the pane scroll frame must scroll on the mouse wheel")
+      -- A page that fits the pane shows no scrollbar; one that overflows
+      -- brings it back (the height is arithmetic, so it is decided at build).
+      assert(not dialog.scrollbar:IsShown(), "a page that fits must not show a scrollbar")
+      assert(dialog.content:GetHeight() <= Dialog.SCROLL_VIEW_HEIGHT)
+      local header = dialog.controls[2]
+      assert(header.spec.type == "header" and header.label.lastPoint == "LEFT"
+        and header.rule and header.rule.lastPoint == "RIGHT",
+        "a section heading must sit at the left with one rule trailing right")
 
-      -- Every built control must carry a back-reference to its spec, and the
-      -- rendered types must match the schema's.
-      local controlIndex, control
-      local executeSeen = false
-      for controlIndex = 1, table.getn(dialog.controls) do
-        control = dialog.controls[controlIndex]
-        assert(control.spec and control.spec.type, "a pane control lost its spec reference")
-        if control.spec.type == "execute" then
-          executeSeen = true
-          -- The panel button sits inset in its row rather than on the cell's
-          -- edge, and a full-width row keeps it at a button's width.
-          assert(control.lastPointX == 4 and control.lastPointY < 0,
-            "execute button must be placed at its cell inset")
-          assert(control:GetWidth() == 200, "full-width execute must keep a button's width")
+      -- Layout: rows hold only controls of one kind. The three tracking
+      -- toggles share a row (x = 0, 170, 340 at one y); the heading that
+      -- follows starts a new, lower row.
+      local function findControl(key)
+        local controlIndex, control
+        for controlIndex = 1, table.getn(dialog.controls) do
+          control = dialog.controls[controlIndex]
+          if control.spec.name == key then return control end
         end
       end
-      assert(executeSeen, "General pane must carry an execute button")
+      local mergePets = findControl("Merge pets into owners")
+      local trackAll = findControl("Track all nearby sources")
+      local nampower = findControl("Use Nampower combat events")
+      assert(mergePets.lastPointX == 0 and trackAll.lastPointX == 170 and nampower.lastPointX == 340,
+        "toggles must flow three to a row")
+      assert(mergePets.lastPointY == trackAll.lastPointY and trackAll.lastPointY == nampower.lastPointY,
+        "toggles in one row must share a y")
+      assert(findControl("Minimap and logging").lastPointY < nampower.lastPointY,
+        "a heading must start a new row below the toggles")
+      assert(nampower.disabled == true and nampower.alpha < 1,
+        "the Nampower toggle must render dimmed while Nampower is absent")
+      assert(mergePets.alpha == 1, "an applicable toggle must not be dimmed")
+
+      -- Data holds the execute button: the panel button sits inset in its
+      -- row rather than on the cell's edge, and a full-width row keeps it at
+      -- a button's width.
+      dialog.sidebar.rows[3].OnClick(dialog.sidebar.rows[3])
+      assert(Dialog.selectedGroup == "data", "clicking the Data row did not select it")
+      assert(rows[3].marker:IsShown() and not rows[1].marker:IsShown(),
+        "the sidebar marker must move to the clicked page")
+      assert(table.getn(dialog.controls) == 10,
+        "Data pane did not build every control: " .. table.getn(dialog.controls))
+      local reset = findControl("Reset all data")
+      assert(reset and reset.spec.type == "execute", "Data must carry the reset button")
+      assert(reset.lastPointX == 4 and reset.lastPointY < 0,
+        "execute button must be placed at its cell inset")
+      assert(reset:GetWidth() == 200, "full-width execute must keep a button's width")
+      local data = pageTypes()
+      assert(data.select == 3 and data.range == 1 and data.note == 1,
+        "Data must carry the three reset policies, the history slider and its note")
+      local enterInstance = findControl("On entering an instance")
+      local joinGroup = findControl("On joining a group")
+      assert(enterInstance.lastPointX == 0 and joinGroup.lastPointX == 170
+        and enterInstance.lastPointY == joinGroup.lastPointY,
+        "selects must flow three to a row")
+
+      -- Appearance holds everything shared by every window, with dependents
+      -- dimmed behind their toggles: the custom bar color only applies with
+      -- class colors off, and a commit on the toggle undims it at once.
+      Dialog:Select("appearance")
+      assert(table.getn(dialog.controls) == 18,
+        "Appearance pane did not build every control: " .. table.getn(dialog.controls))
+      local appearance = pageTypes()
+      assert(appearance.select == 4 and appearance.color == 4 and appearance.toggle == 6,
+        "Appearance must carry the shared dropdowns, swatches and toggles")
+      local classColors = findControl("Class colors")
+      local barColor = findControl("Custom bar color")
+      assert(classColors.lastPointY == barColor.lastPointY and barColor.lastPointX == 170,
+        "a toggle and its color swatch share a row")
+      assert(Skada.db.profile.classColors ~= false)
+      assert(barColor.disabled == true and barColor.alpha < 1,
+        "the custom bar color must be dimmed while class colors are on")
+      classColors.OnClick(classColors)
+      assert(Skada.db.profile.classColors == false, "the toggle click did not commit")
+      assert(barColor.disabled == false and barColor.alpha == 1,
+        "committing the toggle must undim its dependent without a rebuild")
+      classColors.OnClick(classColors)
+      assert(Skada.db.profile.classColors == true and barColor.disabled == true)
+      -- A dimmed control ignores clicks.
+      barColor.OnClick(barColor)
+      assert(not ColorPickerFrame:IsShown(), "a dimmed swatch must not open the picker")
+      local framesAfterPages = checkSubtree(dialog, 0)
+      assert(framesAfterPages > 30, "dialog subtree walk found only " .. framesAfterPages .. " frames")
+
+      -- Pooling: switching back to a page already seen creates no frames
+      -- (a frame on this client is never released), and the controls a page
+      -- gets are the ones it was rendered with before.
+      local created = 0
+      local savedCreateFrame = CreateFrame
+      CreateFrame = function(...)
+        created = created + 1
+        return savedCreateFrame(...)
+      end
+      Dialog:Select("general")
+      Dialog:Select("appearance")
+      Dialog:Select("data")
+      CreateFrame = savedCreateFrame
+      assert(created == 0, "revisiting pages created " .. created .. " frames instead of reusing pooled ones")
+      assert(findControl("Class colors") == nil and findControl("Reset all data") == reset,
+        "the Data page must get back the pooled controls it was rendered with")
 
       -- Opening shows the selection highlight on the active window without
       -- ever replacing its configured border color.
@@ -236,12 +355,17 @@ def run(ctx: Context):
         borderEdges[1].vertexB == configuredBorder[3],
         "selecting a window replaced its configured border color")
 
-      -- Navigating to a window's pane builds its 24 rows; the subtree
-      -- layering must hold after the rebuild too.
+      -- Navigating to a window's pane builds its rows; the subtree layering
+      -- must hold after the rebuild too.
       Dialog:Open("window_" .. tostring(primary.db.id))
-      assert(table.getn(dialog.controls) == 24,
+      assert(table.getn(dialog.controls) == 21,
         "window pane did not build every control: " .. table.getn(dialog.controls))
+      -- A window page fits the pane: no scrolling to reach any row.
+      assert(dialog.content:GetHeight() <= Dialog.SCROLL_VIEW_HEIGHT,
+        "window page overflows the pane: " .. tostring(dialog.content:GetHeight()))
       checkSubtree(dialog, 0)
+      assert(dialog.controls[1].spec.type == "title" and dialog.controls[1].spec.name == primary.db.name,
+        "a window page must be titled with the window's name")
       local litRows = 0
       for windowRowIndex = 1, table.getn(dialog.sidebar.rows) do
         local sidebarRow = dialog.sidebar.rows[windowRowIndex]
@@ -254,14 +378,44 @@ def run(ctx: Context):
         end
       end
       assert(litRows == 1, "exactly one sidebar row must be lit, got " .. litRows)
-      local inputSeen, rangeSeen = false, false
-      for controlIndex = 1, table.getn(dialog.controls) do
-        control = dialog.controls[controlIndex]
-        if control.spec.type == "input" then inputSeen = true end
-        if control.spec.type == "range" then rangeSeen = true end
-      end
-      assert(inputSeen and rangeSeen, "window pane is missing its input or range controls")
+      local window = pageTypes()
+      assert(window.input == 1 and window.range == 7 and window.header == 3 and window.execute == nil,
+        "window pane must hold its input, seven sliders, three headings and no in-page button")
+      assert(dialog.controls[1].description.textValue ~= nil
+        and string.find(dialog.controls[1].description.textValue, "Appearance"),
+        "a window page's subtitle must point at Appearance for the shared look")
+      local widthControl = findControl("Width")
+      local rowsControl = findControl("Rows")
+      assert(widthControl.lastPointX == 0 and rowsControl.lastPointX == 170
+        and widthControl.lastPointY == rowsControl.lastPointY,
+        "sliders must flow three to a row")
+
+      -- Dependents on a window page: size matching dims behind the snap
+      -- toggle, the segment behind a live mode. Snap distance and gap are
+      -- not here: they live on General, once for every window.
+      assert(findControl("Snap distance") == nil and findControl("Snap gap") == nil,
+        "snap distance and gap must not sit on a window page")
+      local snapToggle = findControl("Snap to edges and windows")
+      local snapSize = findControl("Match size when snapped")
+      assert(primary.db.snap and snapSize.disabled == false)
+      snapToggle.OnClick(snapToggle)
+      assert(primary.db.snap == false and snapSize.disabled == true,
+        "size matching must dim while snapping is off")
+      snapToggle.OnClick(snapToggle)
+      assert(primary.db.snap == true and snapSize.disabled == false)
+      assert(findControl("Return after combat") == nil,
+        "the retired return toggle must not render: a combat mode always returns")
+
+      -- The delete action is the button on the page's title row, top-right
+      -- of the pane and never scrolled away; it is bound to the page's
+      -- title-row spec.
+      assert(dialog.titleAction:IsShown() and dialog.titleAction.textValue == "Delete window",
+        "a window page must show the Delete window button on its title row")
+      assert(dialog.titleAction.spec and dialog.titleAction.spec.placement == "title")
+      assert(dialog.titleAction.lastPoint == "TOPRIGHT" and dialog.titleAction.lastRelativeTo == dialog.pane,
+        "the title-row action must anchor to the pane's top-right")
       Dialog:Open("general")
+      assert(not dialog.titleAction:IsShown(), "General must hide the title-row action")
     ''')
 
     # ------------------------------------------------------------------
@@ -281,7 +435,7 @@ def run(ctx: Context):
       local rangeSpec = {
         type = "range", name = "Test range", min = 0, max = 8, step = 1,
         get = function() return sliderValue end,
-        set = function(info, value) sliderValue = value; sliderSetCount = sliderSetCount + 1 end,
+        set = function(value) sliderValue = value; sliderSetCount = sliderSetCount + 1 end,
       }
       local rangeFrame = Controls.Render(anchor, rangeSpec, 170)
       local slider = rangeFrame.slider
@@ -307,7 +461,7 @@ def run(ctx: Context):
         type = "range", name = "Test percent", isPercent = true,
         min = 0, max = 1, step = 0.01,
         get = function() return percentValue end,
-        set = function(info, value) percentValue = value end,
+        set = function(value) percentValue = value end,
       }
       local percentFrame = Controls.Render(anchor, percentSpec, 170)
       assert(percentFrame.valueText:GetText() == "40%",
@@ -323,7 +477,7 @@ def run(ctx: Context):
       local toggleSpec = {
         type = "toggle", name = "Test toggle",
         get = function() return toggleValue end,
-        set = function(info, value) toggleValue = value end,
+        set = function(value) toggleValue = value end,
       }
       local toggleButton = Controls.Render(anchor, toggleSpec, 170)
       assert(toggleButton.frameType == "Button")
@@ -345,7 +499,7 @@ def run(ctx: Context):
         values = function() return { a = "Alpha", b = "Beta", c = "Gamma" } end,
         sorting = function() return { "a", "b", "c" } end,
         get = function() return selectValue end,
-        set = function(info, value) selectValue = value end,
+        set = function(value) selectValue = value end,
       }
       local selectButton = Controls.Render(anchor, selectSpec, 170)
       assert(selectButton.frameType == "Button")
@@ -374,7 +528,20 @@ def run(ctx: Context):
       selectButton.OnClick(selectButton)
       assert(popup:IsShown() and popup.entries[3].marker:IsShown(),
         "reopening must repaint the marker onto the current value")
+      -- A click anywhere outside the open list (the dropdown included)
+      -- lands on the catcher under it and closes the list, nothing picked.
+      local catcher = popup.catcher
+      assert(catcher and catcher:IsShown(), "an open list must raise its click catcher")
+      assert(catcher:GetFrameStrata() == "DIALOG" and catcher:GetFrameLevel() < popup:GetFrameLevel(),
+        "the click catcher must sit above the dialog but under the list")
+      assert(popup.entries[1]:GetFrameLevel() > catcher:GetFrameLevel(),
+        "the list's entries must sit above the click catcher")
+      catcher.OnMouseDown(catcher)
+      assert(not popup:IsShown() and not catcher:IsShown(), "a click outside the list did not close it")
+      assert(selectValue == "c", "closing the list by clicking away must not change the value")
+      selectButton.OnClick(selectButton)
       popup:Hide()
+      assert(not catcher:IsShown(), "closing the list must drop its click catcher")
 
       -- The shared popup must repaint the dropdown that opened it, using
       -- the committed value even when the setter normalizes the selection.
@@ -383,7 +550,7 @@ def run(ctx: Context):
         type = "select", name = "Other select",
         values = selectSpec.values, sorting = selectSpec.sorting,
         get = function() return otherValue end,
-        set = function(info, value) otherValue = value == "c" and "b" or value end,
+        set = function(value) otherValue = value == "c" and "b" or value end,
       }, 170)
       otherButton.OnClick(otherButton)
       popup.entries[3].OnClick(popup.entries[3])
@@ -408,7 +575,7 @@ def run(ctx: Context):
       local colorSpec = {
         type = "color", name = "Test color",
         get = function() return colorRed, colorGreen, colorBlue end,
-        set = function(info, r, g, b) colorRed, colorGreen, colorBlue = r, g, b end,
+        set = function(r, g, b) colorRed, colorGreen, colorBlue = r, g, b end,
       }
       local colorButton = Controls.Render(anchor, colorSpec, 170)
       colorButton.OnClick(colorButton)
@@ -438,12 +605,11 @@ def run(ctx: Context):
       assert(ColorPickerFrame:IsToplevel() == true,
         "picker's toplevel flag must be restored on hide")
 
-      -- Executes: the click calls spec.func({}) -- the old Ace3 `info`
-      -- argument, kept as the call signature.
+      -- Executes: the click calls spec.func().
       local executed = false
       local executeSpec = {
         type = "execute", name = "Test execute",
-        func = function(info) executed = info ~= nil end,
+        func = function() executed = true end,
       }
       local executeButton = Controls.Render(anchor, executeSpec, 510)
       assert(executeButton.frameType == "Button" and executeButton.textValue == "Test execute",
@@ -461,7 +627,7 @@ def run(ctx: Context):
       local inputSpec = {
         type = "input", name = "Test input", width = "full",
         get = function() return inputValue end,
-        set = function(info, value) inputValue = value end,
+        set = function(value) inputValue = value end,
       }
       local inputFrame = Controls.Render(anchor, inputSpec, 170)
       local box = inputFrame.box
@@ -485,6 +651,157 @@ def run(ctx: Context):
       box:GetScript("OnEscapePressed")(box)
       assert(box:GetText() == "Typed name",
         "Escape must revert to the committed value")
+
+      -- Enter on an unchanged value is not a commit (for the window name it
+      -- would freeze an auto-named title as custom); a rejected value puts
+      -- the stored one back on screen and as the revert point.
+      local inputSets = 0
+      inputSpec.set = function(value)
+        inputSets = inputSets + 1
+        if value ~= "" then inputValue = value end
+      end
+      box:SetText("Typed name")
+      box:GetScript("OnEnterPressed")(box)
+      assert(inputSets == 0, "Enter on an unchanged value committed it")
+      box:SetText("")
+      box:GetScript("OnEnterPressed")(box)
+      assert(inputSets == 1 and inputValue == "Typed name")
+      assert(box:GetText() == "Typed name" and rawget(box, "skadaDisplayText") == "Typed name",
+        "a rejected value must show the stored one again")
+      -- A box released to the pool (its page left while it had focus) gives
+      -- up the keyboard, and a stray Enter is harmless.
+      box:GetScript("OnEditFocusGained")(box)
+      Controls.Release(inputFrame)
+      assert(rawget(box, "stubFocused") == false and not rawget(box, "skadaHasFocus"),
+        "a released input kept keyboard focus")
+      box:GetScript("OnEnterPressed")(box)
+
+      -- Click-time dimming: a control painted enabled whose spec has since
+      -- become disabled (changed outside the dialog) refuses the click and
+      -- repaints itself dimmed.
+      local gate = false
+      local gatedValue = false
+      local gatedButton = Controls.Render(anchor, {
+        type = "toggle", name = "Gated toggle",
+        disabled = function() return gate end,
+        get = function() return gatedValue end,
+        set = function(value) gatedValue = value end,
+      }, 170)
+      assert(gatedButton.disabled == false)
+      gate = true
+      gatedButton.OnClick(gatedButton)
+      assert(gatedValue == false, "a control whose spec is now disabled still committed")
+      assert(gatedButton.disabled == true and gatedButton.alpha < 1,
+        "a refused click must repaint the stale dimming")
+      gate = false
+      gatedButton.OnClick(gatedButton)
+      assert(gatedValue == true, "a control whose spec is enabled again refused the click")
+
+      -- A commit-on-release slider (Saved fights deletes fights) writes only
+      -- where the drag ends, not every value it passes.
+      local releasedValue, releasedSets = 10, 0
+      local releaseFrame = Controls.Render(anchor, {
+        type = "range", name = "Release range", min = 1, max = 50, step = 1,
+        commitOnRelease = true,
+        get = function() return releasedValue end,
+        set = function(value) releasedValue = value; releasedSets = releasedSets + 1 end,
+      }, 170)
+      local releaseSlider = releaseFrame.slider
+      releaseSlider:GetScript("OnValueChanged")(releaseSlider, 4)
+      releaseSlider:GetScript("OnValueChanged")(releaseSlider, 10)
+      assert(releasedSets == 0 and releaseFrame.valueText:GetText() == "10",
+        "a commit-on-release drag wrote before release")
+      releaseSlider:GetScript("OnValueChanged")(releaseSlider, 12)
+      releaseSlider:GetScript("OnMouseUp")(releaseSlider)
+      assert(releasedSets == 1 and releasedValue == 12, "release did not commit the final value")
+
+      -- Rebuilding the same page mid-drag drops the held value; leaving
+      -- the page mid-drag still lands it.
+      -- The client fires the slider's OnHide inside the frame's Hide, while
+      -- the spec is still bound; the stub does not, so do it here.
+      local releaseSpec = releaseFrame.spec
+      local stubHide = releaseFrame.Hide
+      releaseFrame.Hide = function(self)
+        releaseSlider:GetScript("OnHide")(releaseSlider)
+        stubHide(self)
+      end
+      releaseSlider:GetScript("OnValueChanged")(releaseSlider, 3)
+      Controls.Release(releaseFrame, true)
+      assert(releasedSets == 1 and releasedValue == 12,
+        "a same-page rebuild committed the value a drag was passing")
+      releaseFrame = Controls.Render(anchor, releaseSpec, 170)
+      releaseSlider = releaseFrame.slider
+      releaseSlider:GetScript("OnValueChanged")(releaseSlider, 20)
+      Controls.Release(releaseFrame, false)
+      assert(releasedSets == 2 and releasedValue == 20, "leaving the page mid-drag lost the value")
+      releaseFrame.Hide = stubHide
+    ''')
+
+    # ------------------------------------------------------------------
+    # The dialog against changes made outside it, and its own rebuilds.
+    # ------------------------------------------------------------------
+    ctx.run(r'''
+      local Dialog = Skada.OptionsDialog
+      local Schema = Skada.OptionsSchema
+      local primary = Skada.UI:GetPrimary()
+      Dialog:Open(Schema.WindowPageKey(primary))
+      local dialog = Dialog.Frame()
+      local function findControl(key)
+        local controlIndex, control
+        for controlIndex = 1, table.getn(dialog.controls) do
+          control = dialog.controls[controlIndex]
+          if control.spec.name == key then return control end
+        end
+      end
+
+      -- Rebuilding the page on screen binds every option to the frame it
+      -- had (a slider held mid-drag keeps writing its own setting).
+      local widthBefore, opacityBefore = findControl("Width"), findControl("Window opacity")
+      Dialog:Refresh()
+      assert(findControl("Width") == widthBefore and findControl("Window opacity") == opacityBefore,
+        "a same-page rebuild shuffled controls between options")
+
+      -- A name being typed survives a same-page rebuild (a window renaming
+      -- itself on a combat switch) with its text and focus.
+      local nameControl = findControl("Window name")
+      local box = nameControl.box
+      rawset(box, "left", 100)
+      Skada.OptionsControls.PumpInputDisplay()
+      box:GetScript("OnEditFocusGained")(box)
+      box:SetText("Tank meter")
+      Dialog:Refresh()
+      Skada.OptionsControls.PumpInputDisplay()
+      assert(findControl("Window name") == nameControl and box:GetText() == "Tank meter"
+        and rawget(box, "skadaHasFocus"), "a same-page rebuild wiped the name being typed")
+      box:GetScript("OnEscapePressed")(box)
+      assert(box:GetText() == primary.db.name, "Escape must revert to the stored name")
+
+      -- Batching: several redraw requests inside one batch rebuild once.
+      local rebuilds = 0
+      local realRebuild = Dialog.RebuildPane
+      Dialog.RebuildPane = function(self) rebuilds = rebuilds + 1 return realRebuild(self) end
+      Skada.Options:BeginBatch()
+      Dialog:Refresh()
+      Dialog:Refresh()
+      Dialog:RepaintControls()
+      assert(rebuilds == 0, "a batched refresh redrew before the batch ended")
+      Skada.Options:EndBatch()
+      assert(rebuilds == 1, "a batch redrew " .. rebuilds .. " times instead of once")
+      Dialog.RebuildPane = realRebuild
+
+      -- A change made outside the dialog (the meter's own mode menu, or a
+      -- combat switch) repaints the open page's values and dimming.
+      local modeBefore = primary.db.mode
+      local segment = findControl("Segment")
+      assert(segment.disabled == false, "segment must be live on a non-live mode")
+      Skada.Modes:Set("threat", primary)
+      primary.manager:NotifyWindowChanged(primary)
+      assert(segment.disabled == true and findControl("Mode").valueText:GetText() == "Threat",
+        "an outside mode change left the open page stale")
+      Skada.Modes:Set(modeBefore, primary)
+      primary.manager:NotifyWindowChanged(primary)
+      assert(segment.disabled == false, "an outside mode change left the segment dimmed")
+      Dialog:Close()
     ''')
 
     # ------------------------------------------------------------------
@@ -503,40 +820,81 @@ def run(ctx: Context):
       assert(options.args.general and options.args.general.type == "group")
       assert(options.args.windows and options.args.windows.type == "group")
 
+      assert(options.args.appearance and options.args.appearance.type == "group")
+      assert(options.args.data and options.args.data.type == "group")
+      assert(options.args.general.order == 1 and options.args.appearance.order == 2
+        and options.args.data.order == 3 and options.args.windows.order == 4,
+        "pages must keep their sidebar order")
+      assert(options.args.general.desc and options.args.appearance.desc and options.args.data.desc,
+        "every page carries the one-line description its title row shows")
+
       local generalArgs = options.args.general.args
-      assert(countKeys(generalArgs) == 29, "General must hold every global row")
-      local globalKeys = {
-        mergePets = true, trackAll = true, combatLogging = true, minimap = true,
-        useNampower = true,
-        behaviorHeader = true, appearanceHeader = true,
-        windowBorderStyle = true, windowBorderColor = true, barTexture = true,
-        fontName = true, classColors = true, barColor = true, spellColors = true,
-        showClassIcons = true, classColorMenus = true, highlightSelf = true,
-        highlightSelfColor = true, barBorder = true, barBorderColor = true,
-        dataHeader = true, maxSegments = true, onlyBossFights = true, numberFormat = true,
-        resetData = true, policyHeader = true, resetOnEnterInstance = true,
-        resetOnJoinGroup = true, resetOnLeaveGroup = true,
-      }
-      local key
-      for key in pairs(globalKeys) do
-        assert(generalArgs[key], "global setting is missing from General: " .. key)
+      local appearanceArgs = options.args.appearance.args
+      local dataArgs = options.args.data.args
+      local function assertKeys(args, expected, pageName)
+        assert(countKeys(args) == countKeys(expected),
+          pageName .. " must hold exactly its rows, got " .. countKeys(args))
+        local key
+        for key in pairs(expected) do
+          assert(args[key], "setting is missing from " .. pageName .. ": " .. key)
+        end
+        for key in pairs(args) do
+          assert(expected[key], "unexpected row on " .. pageName .. ": " .. tostring(key))
+        end
       end
-      for key in pairs(generalArgs) do
-        assert(globalKeys[key], "unexpected row on General: " .. tostring(key))
-      end
+      assertKeys(generalArgs, {
+        trackingHeader = true, mergePets = true, trackAll = true, useNampower = true,
+        clientHeader = true, minimap = true, combatLogging = true,
+        snapHeader = true, snapDistance = true, snapGap = true,
+      }, "General")
+      assertKeys(appearanceArgs, {
+        windowsHeader = true, windowBorderStyle = true, windowBorderColor = true, classColorMenus = true,
+        barsHeader = true, barTexture = true, fontName = true, numberFormat = true,
+        showClassIcons = true, barBorder = true, barBorderColor = true,
+        colorsHeader = true, classColors = true, barColor = true, spellColors = true,
+        highlightSelf = true, highlightSelfColor = true,
+      }, "Appearance")
+      assertKeys(dataArgs, {
+        historyHeader = true, maxSegments = true, onlyBossFights = true, resetData = true,
+        policyHeader = true, resetOnEnterInstance = true, resetOnJoinGroup = true,
+        resetOnLeaveGroup = true, policyNote = true,
+      }, "Data")
       assert(generalArgs.mergePets.type == "toggle")
-      assert(generalArgs.maxSegments.type == "range")
-      assert(generalArgs.fontName.type == "select")
-      assert(generalArgs.windowBorderColor.type == "color")
-      assert(generalArgs.resetData.type == "execute")
-      assert(generalArgs.behaviorHeader.type == "header")
+      assert(dataArgs.maxSegments.type == "range")
+      assert(appearanceArgs.fontName.type == "select")
+      assert(appearanceArgs.windowBorderColor.type == "color")
+      assert(dataArgs.resetData.type == "execute")
+      assert(generalArgs.trackingHeader.type == "header")
+      assert(dataArgs.policyNote.type == "note")
+
+      -- Dependents declare when they do not apply; the schema is the only
+      -- place that knows the rule.
+      local Controls = Skada.OptionsControls
+      Skada.db.profile.barBorder = false
+      assert(Controls.IsDisabled(appearanceArgs.barBorderColor) == true,
+        "bar border color must be disabled while bar borders are off")
+      Skada.db.profile.barBorder = true
+      assert(Controls.IsDisabled(appearanceArgs.barBorderColor) == false)
+      Skada.db.profile.barBorder = false
+      Skada.db.profile.highlightSelf = false
+      assert(Controls.IsDisabled(appearanceArgs.highlightSelfColor) == true)
+      appearanceArgs.windowBorderStyle.set("none")
+      assert(Controls.IsDisabled(appearanceArgs.windowBorderColor) == true,
+        "border color must be disabled with no border")
+      appearanceArgs.windowBorderStyle.set("solid")
+      assert(Controls.IsDisabled(appearanceArgs.windowBorderColor) == false)
+      assert(Controls.IsDisabled(generalArgs.useNampower) == true,
+        "the Nampower toggle must be disabled while Nampower is absent")
 
       -- every leaf must carry order + a get (headers/execute excepted) so it
       -- renders deterministically and reads real state.
-      for key, spec in pairs(generalArgs) do
-        assert(spec.order, "row " .. key .. " has no order")
-        if spec.type ~= "header" and spec.type ~= "execute" then
-          assert(spec.get, "row " .. key .. " has no get")
+      local pageArgs
+      for _, pageArgs in pairs({ generalArgs, appearanceArgs, dataArgs }) do
+        for key, spec in pairs(pageArgs) do
+          assert(spec.order, "row " .. key .. " has no order")
+          if spec.type ~= "header" and spec.type ~= "execute" and spec.type ~= "note" then
+            assert(spec.get, "row " .. key .. " has no get")
+          end
         end
       end
 
@@ -546,25 +904,25 @@ def run(ctx: Context):
 
       -- Bar font dropdown: values/sorting are keyed and ordered off the same
       -- ordered choice list every dropdown in this schema shares.
-      local fontRow = generalArgs.fontName
+      local fontRow = appearanceArgs.fontName
       local fontValues = fontRow.values()
       local fontSorting = fontRow.sorting()
       assert(fontValues["Fonts\\FRIZQT__.TTF"] == "Friz Quadrata")
       assert(fontSorting[1] == "Interface\\AddOns\\Skada\\media\\Accidental Presidency.ttf",
         "font choices lost their intended display order")
       Skada.db.profile.fontName = "Interface\\AddOns\\Skada\\media\\Accidental Presidency.ttf"
-      fontRow.set({}, "Fonts\\FRIZQT__.TTF")
+      fontRow.set("Fonts\\FRIZQT__.TTF")
       assert(Skada.db.profile.fontName == "Fonts\\FRIZQT__.TTF")
-      fontRow.set({}, "Interface\\AddOns\\Skada\\media\\Accidental Presidency.ttf")
+      fontRow.set("Interface\\AddOns\\Skada\\media\\Accidental Presidency.ttf")
       assert(Skada.db.profile.fontName == "Interface\\AddOns\\Skada\\media\\Accidental Presidency.ttf")
       assert(fontRow.get() == "Interface\\AddOns\\Skada\\media\\Accidental Presidency.ttf")
 
       local checkRow = generalArgs.mergePets
       local before = Skada.db.profile.mergePets
       local flipped = not before
-      checkRow.set({}, flipped)
+      checkRow.set(flipped)
       assert(Skada.db.profile.mergePets == flipped)
-      checkRow.set({}, before)
+      checkRow.set(before)
       assert(checkRow.get() == before)
 
       local primary = Skada.UI:GetPrimary()
@@ -581,19 +939,20 @@ def run(ctx: Context):
       local windowArgs = Skada.OptionsSchema:BuildWindowArgs(second)
       assert(windowArgs.width.min == Skada.UIStyle.MIN_WINDOW_WIDTH and windowArgs.width.max == 600)
       assert(windowArgs.width.get() == 321)
-      windowArgs.width.set({}, 205)
+      windowArgs.width.set(205)
       assert(second.db.width == 205 and second.db.width >= Skada.UIStyle.MIN_WINDOW_WIDTH,
         second.db.width)
-      assert(Skada.db.profile.width ~= 205,
-        "secondary window design key leaked into the profile mirror")
+      -- Window settings live on the window only: the profile keeps no copy,
+      -- not even of the first window's.
       local primaryArgs = Skada.OptionsSchema:BuildWindowArgs(primary)
-      primaryArgs.width.set({}, primary.db.width + 5)
-      assert(Skada.db.profile.width == primary.db.width,
-        "primary window design key was not mirrored into the profile")
+      primaryArgs.width.set(primary.db.width + 5)
+      assert(Skada.db.profile.width == nil,
+        "a window setting was copied into the profile")
+      primaryArgs.width.set(primary.db.width - 5)
 
       local fontSizeArgs = Skada.OptionsSchema:BuildWindowArgs(second)
       assert(fontSizeArgs.fontSize.min == 8 and fontSizeArgs.fontSize.max == 22)
-      fontSizeArgs.fontSize.set({}, 15)
+      fontSizeArgs.fontSize.set(15)
       assert(second.db.fontSize == 15, second.db.fontSize)
 
       -- barAlpha/windowOpacity are percent ranges: 0..1 values displayed as
@@ -603,19 +962,27 @@ def run(ctx: Context):
 
       windowArgs = Skada.OptionsSchema:BuildWindowArgs(second)
       assert(windowArgs.width and windowArgs.name and windowArgs.mode and windowArgs.segment
-        and windowArgs.combatMode and windowArgs.returnAfterCombat
+        and windowArgs.combatMode and not windowArgs.returnAfterCombat
         and windowArgs.deleteWindow, "window args missing expected rows")
       assert(not windowArgs.windowBorderStyle and not windowArgs.windowBorderColor,
         "global border controls leaked onto a window's args")
-      assert(countKeys(windowArgs) == 24, "window args must hold every per-window row")
-
       local modeBefore = second.db.mode
-      windowArgs.mode.set({}, "healing")
+      assert(countKeys(windowArgs) == 21, "window args must hold every per-window row")
+      assert(windowArgs.deleteWindow.placement == "title", "delete belongs to the title row")
+      assert(not windowArgs.snapDistance and not windowArgs.snapGap,
+        "snap distance and gap moved to General")
+      assert(Skada.OptionsControls.IsDisabled(windowArgs.snapSize) == not second.db.snap)
+      second.db.mode = "threat"
+      assert(Skada.OptionsControls.IsDisabled(windowArgs.segment) == true,
+        "the segment must be disabled on a live mode")
+      second.db.mode = modeBefore
+
+      windowArgs.mode.set("healing")
       assert(second.db.mode == "healing", second.db.mode)
-      windowArgs.mode.set({}, "threat")
+      windowArgs.mode.set("threat")
       assert(second.db.mode == "threat" and second.db.segment == "current",
         "live mode did not coerce the segment")
-      windowArgs.mode.set({}, modeBefore)
+      windowArgs.mode.set(modeBefore)
       assert(second.db.mode == modeBefore)
 
       -- an auto-named window follows its mode's name; a hand-set name stays,
@@ -631,7 +998,7 @@ def run(ctx: Context):
         "a new window should be auto-named from its mode")
       local autoArgs = Skada.OptionsSchema:BuildWindowArgs(auto)
       refreshed = false
-      autoArgs.mode.set({}, "healing")
+      autoArgs.mode.set("healing")
       assert(auto.db.mode == "healing" and auto.db.name == "Healing" and not auto.db.nameIsCustom,
         "switching mode did not rename the auto-named window")
       assert(refreshed, "renaming via mode switch did not refresh the open dialog")
@@ -639,14 +1006,14 @@ def run(ctx: Context):
         "a freshly-built windows group did not pick up the mode-derived name")
 
       refreshed = false
-      autoArgs.name.set({}, "My meter")
+      autoArgs.name.set("My meter")
       assert(auto.db.name == "My meter" and auto.db.nameIsCustom,
         "manual rename did not mark the window as custom-named")
       assert(refreshed, "renaming did not refresh the open dialog")
       auto:Refresh()
       assert(auto.title.textValue == "My meter",
         "refresh did not paint a custom window title")
-      autoArgs.mode.set({}, "threat")
+      autoArgs.mode.set("threat")
       assert(auto.db.name == "My meter", "mode switch clobbered a custom window name")
       auto:Refresh()
       assert(auto.title.textValue == "My meter",
@@ -655,59 +1022,54 @@ def run(ctx: Context):
       Dialog.Refresh = savedRefresh
 
       windowArgs = Skada.OptionsSchema:BuildWindowArgs(second)
-      windowArgs.segment.set({}, 1)
+      windowArgs.segment.set(1)
       assert(second.db.segment == 1, second.db.segment)
-      windowArgs.segment.set({}, "total")
+      windowArgs.segment.set("total")
       assert(second.db.segment == "total", second.db.segment)
-      windowArgs.segment.set({}, "current")
+      windowArgs.segment.set("current")
       assert(second.db.segment == "current", second.db.segment)
 
       -- combat mode switching an in-combat window applies immediately
       local combatBefore = second.db.combatMode
-      windowArgs.combatMode.set({}, "threat")
+      windowArgs.combatMode.set("threat")
       assert(second.db.combatMode == "threat", second.db.combatMode)
-      assert(Skada.db.profile.combatMode == combatBefore,
-        "secondary window combat mode leaked into the profile mirror")
-      windowArgs.combatMode.set({}, "")
+      windowArgs.combatMode.set("")
       assert(second.db.combatMode == "", second.db.combatMode)
 
-      windowArgs.name.set({}, "Renamed meter")
+      windowArgs.name.set("Renamed meter")
       assert(second.db.name == "Renamed meter", second.db.name)
 
       local wasVisible = second.db.visible
-      windowArgs.visible.set({}, false)
+      windowArgs.visible.set(false)
       assert(second.db.visible == false and not second.frame:IsShown(),
         "visibility toggle did not hide the window")
-      windowArgs.visible.set({}, true)
+      windowArgs.visible.set(true)
       assert(second.db.visible == true and second.frame:IsShown(),
         "visibility toggle did not reshow the window")
-      if not wasVisible then windowArgs.visible.set({}, false) end
+      if not wasVisible then windowArgs.visible.set(false) end
 
       local hideBefore = second.db.hideTitle
-      windowArgs.hideTitle.set({}, not hideBefore)
+      windowArgs.hideTitle.set(not hideBefore)
       assert(second.db.hideTitle == not hideBefore and second.layoutDirty,
         "hide-title toggle did not mark the window layout dirty")
-      windowArgs.hideTitle.set({}, hideBefore)
-
-      local racBefore = second.db.returnAfterCombat
-      windowArgs.returnAfterCombat.set({}, not racBefore)
-      assert(second.db.returnAfterCombat == not racBefore)
-      windowArgs.returnAfterCombat.set({}, racBefore)
+      windowArgs.hideTitle.set(hideBefore)
 
       local sizeBefore = second.db.snapSize
-      windowArgs.snapSize.set({}, not sizeBefore)
+      windowArgs.snapSize.set(not sizeBefore)
       assert(second.db.snapSize == not sizeBefore)
-      windowArgs.snapSize.set({}, sizeBefore)
+      windowArgs.snapSize.set(sizeBefore)
 
-      local snapBefore = Skada.db.profile.snapDistance
-      windowArgs.snapDistance.set({}, 12)
-      assert(second.db.snapDistance == 12, second.db.snapDistance)
-      assert(Skada.db.profile.snapDistance == snapBefore,
-        "secondary window snap key leaked into the profile mirror")
-      local primarySnapArgs = Skada.OptionsSchema:BuildWindowArgs(primary)
-      primarySnapArgs.snapDistance.set({}, 7)
-      assert(Skada.db.profile.snapDistance == primary.db.snapDistance,
-        "primary window snap key was not mirrored into the profile")
+      -- Snap distance and gap are edited once, on General, and written to
+      -- every window; the getter reads the primary.
+      local snapArgs = Skada.OptionsSchema:BuildOptions().args.general.args
+      snapArgs.snapDistance.set(7)
+      assert(second.db.snapDistance == 7 and primary.db.snapDistance == 7,
+        "General snap distance must reach every window")
+      assert(snapArgs.snapDistance.get() == 7)
+      snapArgs.snapGap.set(3)
+      assert(second.db.snapGap == 3 and primary.db.snapGap == 3)
+      snapArgs.snapDistance.set(12)
+      snapArgs.snapGap.set(0)
     ''')
 
     # ------------------------------------------------------------------
@@ -734,7 +1096,7 @@ def run(ctx: Context):
       -- that creation triggers must keep the header, the plus, and the new
       -- row (every sidebar row is rebuilt from scratch on refresh).
       local windowsBefore = table.getn(Skada.UI.windows)
-      local plus = rows[2].plusButton
+      local plus = rows[4].plusButton
       plus.OnClick(plus)
       local third = Skada.Options.selectedWindow
       assert(third and third ~= second and third ~= primary, "new window was not created and selected")
@@ -743,11 +1105,11 @@ def run(ctx: Context):
       assert(Skada.UI.byID[third.db.id] == third, "created window missing from the registry")
       assert(Dialog.selectedGroup == "window_" .. tostring(third.db.id),
         "creating a window did not open its pane")
-      assert(table.getn(dialog.controls) == 24, "the new window's pane did not build")
+      assert(table.getn(dialog.controls) == 21, "the new window's pane did not build")
       rows = dialog.sidebar.rows
-      assert(table.getn(rows) == 2 + table.getn(Skada.UI.windows),
+      assert(table.getn(rows) == 4 + table.getn(Skada.UI.windows),
         "sidebar did not relist the windows after the creation rebuild")
-      assert(rows[2].plusButton and rawget(rows[2].plusButton, "normalTexture") == "Interface\\Buttons\\UI-PlusButton-UP",
+      assert(rows[4].plusButton and rawget(rows[4].plusButton, "normalTexture") == "Interface\\Buttons\\UI-PlusButton-UP",
         "the Windows row lost its plus after the rebuild")
       assert(rows[table.getn(rows)].text.textValue == third.db.name,
         "the new window is not listed under the Windows header")
@@ -767,7 +1129,8 @@ def run(ctx: Context):
       end
       assert(inputControl, "the window pane has no input control")
       local box = inputControl.box
-      assert(box:GetText() == nil, "the window-name box must start unfilled")
+      -- A fresh box was never SetText; a pooled one is blanked on rebind.
+      assert(box:GetText() == nil or box:GetText() == "", "the window-name box must start unfilled")
       rawset(box, "left", 100)
       Skada.OptionsControls.PumpInputDisplay()
       assert(box:GetText() == third.db.name,
@@ -783,8 +1146,9 @@ def run(ctx: Context):
       -- Delete: confirmation first (StaticPopup lives at DIALOG, above this
       -- HIGH dialog), fallback of the selection after accept.
       Skada.Options:SelectWindow(third)
-      local thirdArgs = Skada.OptionsSchema:BuildWindowArgs(third)
-      thirdArgs.deleteWindow.func({})
+      assert(dialog.titleAction:IsShown() and dialog.titleAction.spec.name == "Delete window",
+        "the selected window's page must offer the title-row delete button")
+      dialog.titleAction.OnClick(dialog.titleAction)
       assert(TestLastPopup == "SKADA_DELETE_WINDOW", tostring(TestLastPopup))
       assert(Skada.UI.byID[third.db.id] == third, "delete popup must not delete before accept")
       assert(StaticPopupDialogs.SKADA_DELETE_WINDOW, "delete dialog not registered")
@@ -826,13 +1190,14 @@ def run(ctx: Context):
       profile.numberFormat = "compact"
       assert(Skada:FormatNumber(12345) == "12k")
 
-      local generalArgs = Skada.OptionsSchema:BuildOptions().args.general.args
-      generalArgs.numberFormat.set({}, "compact1")
+      local pages = Skada.OptionsSchema:BuildOptions().args
+      local generalArgs, appearanceArgs, dataArgs = pages.general.args, pages.appearance.args, pages.data.args
+      appearanceArgs.numberFormat.set("compact1")
       assert(profile.numberFormat == "compact1", profile.numberFormat)
-      generalArgs.numberFormat.set({}, "compact")
+      appearanceArgs.numberFormat.set("compact")
 
       profile.maxSegments = 10
-      generalArgs.maxSegments.set({}, 7)
+      dataArgs.maxSegments.set(7)
       assert(profile.maxSegments == 7, profile.maxSegments)
       assert(table.getn(Skada.Data.history) <= profile.maxSegments,
         "history was not trimmed to the new value")
@@ -843,7 +1208,7 @@ def run(ctx: Context):
       Skada.Data.clientInCombat = false
       Skada.Data.active = false
       table.insert(Skada.Data.history, Skada.Data.current)
-      generalArgs.resetData.func({})
+      dataArgs.resetData.func()
       assert(TestLastPopup == "SKADA_RESET_DATA", tostring(TestLastPopup))
       assert(table.getn(Skada.Data.history) >= 1, "reset popup must not clear before accept")
       StaticPopupDialogs.SKADA_RESET_DATA.OnAccept()
@@ -870,6 +1235,8 @@ def run(ctx: Context):
       assert(TestLastPopup == "SKADA_RESET_POLICY", tostring(TestLastPopup))
       table.insert(Skada.Data.history, Skada.Data.current)
       Skada.Data.active = true
+      StaticPopupDialogs.SKADA_RESET_POLICY.OnAccept()
+      assert(table.getn(Skada.Data.history) == 1, "an accepted reset popup cleared data mid-fight")
       fire("ZONE_CHANGED_NEW_AREA")
       assert(table.getn(Skada.Data.history) == 1, "reset fired while a segment was active")
       Skada.Data.active = false
@@ -902,27 +1269,47 @@ def run(ctx: Context):
       GetNumRaidMembers = savedGetNumRaidMembers
       GetNumPartyMembers = savedGetNumPartyMembers
 
-      local windowBorderRow = generalArgs.windowBorderStyle
+      local windowBorderRow = appearanceArgs.windowBorderStyle
       local borderValues = windowBorderRow.values()
       assert(borderValues.solid and borderValues.none)
-      windowBorderRow.set({}, "solid")
-      assert(Skada.db.profile.windowBorderStyle == "solid" and
-        not Skada.db.profile.hideWindowBorder,
+      windowBorderRow.set("solid")
+      assert(Skada.db.profile.windowBorderStyle == "solid",
         "solid window border choice was not saved")
-      windowBorderRow.set({}, "none")
-      assert(Skada.db.profile.hideWindowBorder,
-        "borderless choice did not preserve the legacy setting")
-      windowBorderRow.set({}, "solid")
-      assert(Skada.db.profile.windowBorderStyle == "solid" and
-        not Skada.db.profile.hideWindowBorder)
+      windowBorderRow.set("none")
+      assert(Skada.db.profile.windowBorderStyle == "none" and windowBorderRow.get() == "none",
+        "borderless choice was not saved")
+      windowBorderRow.set("solid")
+      assert(Skada.db.profile.windowBorderStyle == "solid")
 
       local miniRow = generalArgs.minimap
-      miniRow.set({}, false)
+      miniRow.set(false)
       assert(Skada.db.profile.minimap.show == false)
       assert(not Skada.Options.minimapButton:IsShown())
-      miniRow.set({}, true)
+      miniRow.set(true)
       assert(Skada.db.profile.minimap.show == true)
       assert(Skada.Options.minimapButton:IsShown())
+
+      -- Left-click toggles every window together, not just the active one:
+      -- all hide while any is shown, all show otherwise, and each window's
+      -- own visible flag follows.
+      local button = Skada.Options.minimapButton
+      local extra = Skada.UI:CreateNew("Minimap toggle meter")
+      local primary = Skada.UI:GetPrimary()
+      assert(primary.db.visible and extra.db.visible)
+      button.OnClick(button, "LeftButton")
+      assert(not primary.db.visible and not extra.db.visible
+        and not primary.frame:IsShown() and not extra.frame:IsShown(),
+        "left-click must hide every window")
+      extra.db.visible = true
+      extra.frame:Show()
+      button.OnClick(button, "LeftButton")
+      assert(not primary.db.visible and not extra.db.visible,
+        "with any window shown, left-click must hide all")
+      button.OnClick(button, "LeftButton")
+      assert(primary.db.visible and extra.db.visible
+        and primary.frame:IsShown() and extra.frame:IsShown(),
+        "with every window hidden, left-click must show all")
+      assert(Skada.UI:DeleteWindow(extra))
     ''')
 
     # ------------------------------------------------------------------
@@ -945,8 +1332,8 @@ def run(ctx: Context):
       Skada.Options:Open()
       dialog = Skada.OptionsDialog.Frame()
       assert(dialog:IsShown(), "Open did not reshow the dialog")
-      assert(table.getn(dialog.controls) == 29, "reopen did not rebuild the pane")
-      assert(table.getn(dialog.sidebar.rows) == 2 + table.getn(Skada.UI.windows),
+      assert(table.getn(dialog.controls) == 11, "reopen did not rebuild the pane")
+      assert(table.getn(dialog.sidebar.rows) == 4 + table.getn(Skada.UI.windows),
         "reopen did not rebuild the sidebar")
       assert(borderEdges[1].vertexR == configuredBorder[1],
         "reopening settings changed the configured border color")

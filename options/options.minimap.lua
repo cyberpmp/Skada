@@ -112,17 +112,11 @@ function MinimapButton:Create()
       if window then window:ShowResetPopup() end
       return
     end
-    local window = Skada.UI:GetActive()
-    if not window then return end
-    window.db.visible = not window.db.visible
-    if window.db.visible then window.frame:Show() else window.frame:Hide() end
-    window.layoutDirty = true
-    Skada.UI:SyncLegacy(window)
-    Skada:MarkDirty()
+    Skada.UI:ToggleAllWindows()
   end)
 
   attachTooltip(instance, "Skada",
-    "Left-click to show or hide the meter window.\nRight-click to open the settings window.\nShift-click to reset fight data. Drag to reposition.")
+    "Left-click to show or hide every meter window.\nRight-click to open the settings window.\nShift-click to reset fight data. Drag to reposition.")
 
   positionAt(instance, Skada.db.profile.minimap.angle)
   if Skada.db.profile.minimap.show == false then instance:Hide() end

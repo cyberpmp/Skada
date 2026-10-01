@@ -132,25 +132,41 @@ end
 -- length doesn't match what's actually in the table, instead of trusting a
 -- length that native-style mutation could have silently invalidated.
 do
+  local rawget, rawset = rawget, rawset
   local sizes = setmetatable({}, { __mode = "k" })
   local function checkint(value)
     if type(value) == "number" and math.floor(value) == value and value >= 0 then return value end
     return nil
   end
+  -- Every read and write below is raw, as the native C table library's
+  -- are (lua_rawgeti/lua_rawseti in Lua 5.0's ltablib.c): a table with an
+  -- __index metamethod must never see the length probe. Confirmed in game:
+  -- Bagshui's rule environment gives its item table a case-insensitive
+  -- __index that asserts on any miss, and clears that table through
+  -- table.getn -- with a plain t[1] probe here, the length check itself
+  -- tripped the assertion (Rules.lua:765) and every bag came up blank.
   local function realgetn(t)
     local n = checkint(rawget(t, "n"))
     if n then return n end
     n = sizes[t]
-    if n and ((n == 0 and t[1] == nil) or (n > 0 and t[n] ~= nil and t[n + 1] == nil)) then
+    if n and ((n == 0 and rawget(t, 1) == nil)
+        or (n > 0 and rawget(t, n) ~= nil and rawget(t, n + 1) == nil)) then
       return n
     end
     local i = 1
-    while t[i] ~= nil do i = i + 1 end
+    while rawget(t, i) ~= nil do i = i + 1 end
     sizes[t] = i - 1
     return i - 1
   end
+  -- Records a length insert/remove has just made true. Unlike setn there
+  -- is nothing to truncate, and going through setn would ask realgetn for
+  -- the old length after the content already changed -- a cache miss and a
+  -- full rescan on every call, quadratic over any list built or drained.
+  local function noteLength(t, n)
+    if checkint(rawget(t, "n")) then rawset(t, "n", n) else sizes[t] = n end
+  end
   local function setn(t, n)
-    if checkint(rawget(t, "n")) then rawset(t, "n", n) else
+    if not checkint(rawget(t, "n")) then
       -- A shrink is a length contract, not a note beside the data. Lua-5.0
       -- callers (TurtleMail's recipient autocomplete, for one) do
       -- table.setn(list, 0) to clear a list, refill it with table.insert,
@@ -162,9 +178,9 @@ do
       -- binary-searches the same -- so a shrink nils the tail and content
       -- and tracked length agree again.
       local i
-      for i = n + 1, realgetn(t) do t[i] = nil end
-      sizes[t] = n
+      for i = n + 1, realgetn(t) do rawset(t, i, nil) end
     end
+    noteLength(t, n)
   end
   table.getn = realgetn
   table.setn = setn
@@ -172,27 +188,27 @@ do
     if select("#", ...) <= 1 then
       local n = realgetn(t)
       local value = ...
-      t[n + 1] = value
-      setn(t, n + 1)
+      rawset(t, n + 1, value)
+      noteLength(t, n + 1)
     else
       local pos, value = ...
       local n = realgetn(t) + 1
       if pos > n then n = pos end
       local j
-      for j = n, pos + 1, -1 do t[j] = t[j - 1] end
-      t[pos] = value
-      setn(t, n)
+      for j = n, pos + 1, -1 do rawset(t, j, rawget(t, j - 1)) end
+      rawset(t, pos, value)
+      noteLength(t, n)
     end
   end
   table.remove = function(t, index)
     local n = realgetn(t)
     if n <= 0 then return end
     index = index or n
-    local removed = t[index]
+    local removed = rawget(t, index)
     local j
-    for j = index, n - 1 do t[j] = t[j + 1] end
-    t[n] = nil
-    setn(t, n - 1)
+    for j = index, n - 1 do rawset(t, j, rawget(t, j + 1)) end
+    rawset(t, n, nil)
+    noteLength(t, n - 1)
     return removed
   end
 
@@ -214,17 +230,31 @@ do
   -- The previous last-pivot quicksort took quadratic time and linear stack
   -- depth on sorted or equal values. This global shim also serves other
   -- addons, so bound every input to O(n log n) work and O(log n) stack space.
+  -- Raw like the length shim above (native sort uses lua_rawgeti too), and
+  -- bounded like native auxsort: a comparator that is not a strict order
+  -- (`a <= b`, or one that tolerates nil) would otherwise walk the
+  -- partition scan off the end of the range forever.
+  local function invalidOrder()
+    error("invalid order function for sorting", 3)
+  end
   local function siftDown(t, comp, root, size, offset)
-    local value = t[offset + root]
+    local value = rawget(t, offset + root)
     local child = root * 2
     while child <= size do
-      if child < size and comp(t[offset + child], t[offset + child + 1]) then child = child + 1 end
-      if not comp(value, t[offset + child]) then break end
-      t[offset + root] = t[offset + child]
+      if child < size and comp(rawget(t, offset + child), rawget(t, offset + child + 1)) then
+        child = child + 1
+      end
+      if not comp(value, rawget(t, offset + child)) then break end
+      rawset(t, offset + root, rawget(t, offset + child))
       root = child
       child = root * 2
     end
-    t[offset + root] = value
+    rawset(t, offset + root, value)
+  end
+  local function swap(t, first, second)
+    local value = rawget(t, first)
+    rawset(t, first, rawget(t, second))
+    rawset(t, second, value)
   end
   local function heapsort(t, comp, lo, hi)
     local size, offset = hi - lo + 1, lo - 1
@@ -232,7 +262,7 @@ do
     for root = math.floor(size / 2), 1, -1 do siftDown(t, comp, root, size, offset) end
     local last
     for last = size, 2, -1 do
-      t[lo], t[offset + last] = t[offset + last], t[lo]
+      swap(t, lo, offset + last)
       siftDown(t, comp, 1, last - 1, offset)
     end
   end
@@ -240,13 +270,19 @@ do
     while hi - lo > 12 do
       if depth == 0 then heapsort(t, comp, lo, hi); return end
       depth = depth - 1
-      local pivot = t[math.floor((lo + hi) / 2)]
+      local pivot = rawget(t, math.floor((lo + hi) / 2))
       local left, right = lo, hi
       repeat
-        while comp(t[left], pivot) do left = left + 1 end
-        while comp(pivot, t[right]) do right = right - 1 end
+        while comp(rawget(t, left), pivot) do
+          left = left + 1
+          if left > hi then invalidOrder() end
+        end
+        while comp(pivot, rawget(t, right)) do
+          right = right - 1
+          if right < lo then invalidOrder() end
+        end
         if left <= right then
-          t[left], t[right] = t[right], t[left]
+          swap(t, left, right)
           left, right = left + 1, right - 1
         end
       until left > right
@@ -262,12 +298,12 @@ do
     -- Insertion sort avoids partition overhead on small ranges.
     local index
     for index = lo + 1, hi do
-      local value, previous = t[index], index - 1
-      while previous >= lo and comp(value, t[previous]) do
-        t[previous + 1] = t[previous]
+      local value, previous = rawget(t, index), index - 1
+      while previous >= lo and comp(value, rawget(t, previous)) do
+        rawset(t, previous + 1, rawget(t, previous))
         previous = previous - 1
       end
-      t[previous + 1] = value
+      rawset(t, previous + 1, value)
     end
   end
   local function ascending(a, b) return a < b end
@@ -328,7 +364,7 @@ do
       local n = realgetn(t)
       local i
       for i = 1, n do
-        local result = f(i, t[i])
+        local result = f(i, rawget(t, i))
         if result ~= nil then return result end
       end
     end

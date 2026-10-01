@@ -92,19 +92,66 @@ def run(ctx: Context):
         for i = 2, 4096 do assert(values[i - 1] <= values[i]) end
       end
 
-      local reads, length = 0, 512
-      local externalList = setmetatable({}, { __index = function(_, index)
-        reads = reads + 1
-        if index <= length then return index end
-      end })
+      -- The length shim self-heals against native-style mutation (a
+      -- `t[n + 1] = v` append or a `t[n] = nil` trim that the tracked size
+      -- never saw) while staying raw like the native library: a table's
+      -- __index is never consulted, so a proxy or strict table (Bagshui's
+      -- rule item table asserts on any miss) is safe to measure.
+      local externalList = {}
+      local fillIndex
+      for fillIndex = 1, 512 do externalList[fillIndex] = fillIndex end
       assert(table.getn(externalList) == 512)
-      reads = 0
-      for i = 1, 100 do assert(table.getn(externalList) == 512) end
-      assert(reads <= 200, "unchanged external list was rescanned on each length read")
-      length = 513
-      assert(table.getn(externalList) == 513, "cached length missed an external append")
-      length = 1
-      assert(table.getn(externalList) == 1, "cached length missed external removal")
+      externalList[513] = 513
+      assert(table.getn(externalList) == 513, "cached length missed a native-style append")
+      externalList[513] = nil
+      externalList[512] = nil
+      assert(table.getn(externalList) == 511, "cached length missed a native-style trim")
+      local probed = false
+      local proxied = setmetatable({}, { __index = function() probed = true end })
+      assert(table.getn(proxied) == 0 and not probed,
+        "the length shim must not read through __index (the native library is raw)")
+
+      -- The cached length must actually be used: an unchanged list is not
+      -- rescanned per read, and a list built or drained through
+      -- insert/remove is not rescanned per call (that was quadratic for
+      -- every addon in the client). Counted in VM instructions, which a
+      -- rescan of 4000 entries per call would multiply by thousands.
+      if debug and debug.sethook then
+        local function instructions(work)
+          local ticks = 0
+          debug.sethook(function() ticks = ticks + 1 end, "", 100)
+          work()
+          debug.sethook()
+          return ticks * 100
+        end
+        local built = {}
+        local cost = instructions(function()
+          local itemIndex
+          for itemIndex = 1, 4000 do table.insert(built, itemIndex) end
+        end)
+        assert(table.getn(built) == 4000)
+        assert(cost < 4000 * 200, "table.insert rescanned the list per call: " .. cost)
+        cost = instructions(function()
+          local readIndex
+          for readIndex = 1, 4000 do assert(table.getn(built) == 4000) end
+        end)
+        assert(cost < 4000 * 100, "an unchanged list was rescanned per length read: " .. cost)
+        cost = instructions(function()
+          while table.getn(built) > 0 do table.remove(built) end
+        end)
+        assert(built[1] == nil, "draining lost track of the list")
+        assert(cost < 4000 * 200, "table.remove rescanned the list per call: " .. cost)
+      end
+
+      -- Sort is raw and bounded like native auxsort: a comparator that is
+      -- not a strict order must raise, not run the partition scan off the
+      -- end of the range forever (through __index or nil-tolerant compares).
+      local padded = setmetatable({}, { __index = function() return 0 end })
+      local padIndex
+      for padIndex = 1, 20 do rawset(padded, padIndex, 5) end
+      local sorted, sortError = pcall(table.sort, padded, function(a, b) return a <= b end)
+      assert(not sorted and string.find(tostring(sortError), "invalid order function", 1, true),
+        "a non-strict comparator did not raise: " .. tostring(sortError))
 
       -- A setn shrink is a length contract for Lua-5.0-style callers:
       -- TurtleMail's mail recipient autocomplete clears its suggestion list

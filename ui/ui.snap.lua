@@ -174,5 +174,5 @@ function SnapDock.PersistGeometry(window, persistPoint)
     local point, _, relativePoint, x, y = frame:GetPoint(1)
     profile.point, profile.relativePoint, profile.x, profile.y = point, relativePoint, x, y
   end
-  window.manager:SyncLegacy(window)
+  window.manager:NotifyWindowChanged(window)
 end

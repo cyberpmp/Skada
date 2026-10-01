@@ -2,10 +2,55 @@
 
 All notable changes to the PMP Skada rewrite are documented here.
 
-## Unreleased
+## 3.0.0 - 2026-10-01
 
 ### Fixed
 
+- Left-clicking the minimap button now hides every meter window, not just
+  the active one, and the next click shows back exactly the windows it hid:
+  a window you hid yourself stays hidden. A window that failed to build no
+  longer blocks the show (its stale flag used to make every click a hide).
+- Saved fights no longer vanish while dragging the Saved fights slider:
+  it now applies the value you let go at, instead of trimming the history
+  at every lower value the drag passed through. A page refresh while the
+  slider is still held (a window renaming itself as combat starts) no
+  longer applies the value the drag was passing.
+- An open settings dropdown now closes when you click anywhere outside it,
+  the dropdown itself included, like the default UI's menus. Before, only
+  picking an entry or closing the dialog put the list away.
+- Accepting the "Reset Skada data for the new encounter context?" popup
+  after a fight has started no longer wipes that fight; an automatic reset
+  never runs mid-fight.
+- A snap gap of 4 now sticks. An old one-off fix-up turned 4 into 0 on
+  every load; it now runs once. Profiles from before snap distance and gap
+  moved to General get every window set to the first window's values, so
+  the General sliders show what each window really uses.
+- Pressing Enter in a window's name box without changing the name no
+  longer marks the window as custom-named (which stopped its title from
+  following its mode). An empty name is refused and the stored name comes
+  back in the box. Leaving the page while typing no longer leaves the
+  hidden box holding the keyboard.
+- Settings that changed outside the dialog (a mode picked from the meter's
+  menu, a combat switch, a window shown or hidden) now repaint an open
+  settings page at once. A setting that had become clickable again could
+  stay dimmed and ignore clicks until the page was reopened.
+- Slider and window-name tooltips show again; they were attached to frames
+  that never receive the mouse.
+- Skada's replacement `table.insert`/`table.remove` no longer rescan the
+  whole list on every call, which made building or draining a long list
+  quadratic for every addon in the client. Its `table.sort` raises
+  "invalid order function for sorting" like the native one when given a
+  comparator that is not a strict order, instead of looping forever.
+- Bagshui's bags no longer come up blank with Skada loaded
+  (`Components/Rules.lua:765: assertion failed!`). Skada's replacement
+  `table.getn`/`insert`/`remove`/`setn` (needed because this client's
+  native length tracking goes stale on `t[n + 1] = v` appends) probed
+  `t[1]` through the table's metatable to find the length. Bagshui's rule
+  engine gives its item table a case-insensitive `__index` that asserts on
+  any miss and clears that table through `table.getn`, so the length check
+  itself tripped the assertion on every item. The shims, `table.sort`
+  included, now read and write raw, as the native Lua 5.0 table library
+  does.
 - Estimated threat for area spells never received Nampower's targets-hit
   count. The threat estimator listened for the spell-go events on Skada's
   shared frame, whose registration is gated on the client's event validator,
@@ -19,6 +64,72 @@ All notable changes to the PMP Skada rewrite are documented here.
   by every mob near it and dies by design when it fires, and none of that
   belongs in damage taken, avoids or deaths, for the totem or its owner.
   Group pets on a pet token keep their own rows as before.
+
+### Changed
+
+- The settings dialog was reorganized around what a player is looking for.
+  The old General page, one 29-control scroll of behavior, appearance, data
+  and reset rows, is now three short pages: General (tracking, minimap,
+  combat-file logging), Appearance (everything every window shares: window
+  border, bar texture, font, number format, bar borders, class and spell
+  colors, own-row highlight) and Data (fight history, the reset button, the
+  automatic-reset policies). Each window's page now fits the dialog without
+  scrolling, in three sections: Window (name, visible, locked, title bar,
+  snapping on or off, size matching), Display (mode, segment, combat mode,
+  automatic segments) and Layout (size, rows, font size, opacities). It opens with
+  the window's name as its title and a subtitle saying fonts and colors are
+  shared and live under Appearance, so the per-window versus shared split
+  is visible instead of guessed at. Snap distance and gap left the window
+  pages for General: they are one setting for every window, not something
+  anyone tunes per window. Delete window moved from the last row of the
+  page, which needed scrolling to reach, to the page's title row beside the
+  window's name.
+- The settings dialog lost its boxes within the box. The sidebar and the
+  page no longer sit in their own tooltip-bordered insets; they share the
+  dialog's surface with one hairline between them, section headings sit at
+  the left with a single rule trailing off to the right instead of being
+  framed between two strips, and the scrollbar with its arrow buttons only
+  appears when a page is taller than the pane, which none of the stock
+  pages are now.
+- The title row of a meter window no longer draws its own tinted strip and
+  hairline. The window backdrop is the only background, so the title and
+  its buttons sit directly on it; at low window opacity the strip had read
+  as a ghost band floating over the bars.
+- A combat mode is now always a round trip: the window switches to it when
+  combat starts and returns to its previous mode, and its previous segment
+  (a window parked on Overall or a saved fight comes back there), when
+  combat ends. The way back is saved, so a /reload mid-fight or a window
+  created mid-fight still returns; a mode or segment picked by hand during the fight
+  is kept. The separate "Return after combat" toggle asked the same
+  question twice and is gone; a window that should always show one mode
+  just sets that mode. The old flag is dropped from saved profiles.
+- Settings rows now line up: a row holds only controls of one kind (check
+  boxes beside check boxes, sliders beside sliders, dropdowns beside
+  dropdowns), every page opens with a title and description, headings get
+  air above them so sections read as blocks, and the dialog grew from 560
+  to 640 tall so a window page shows whole.
+- Settings that do not apply right now dim instead of sitting there live:
+  the custom bar color while class colors are on, the border color with no
+  border, bar border color with bar borders off, size matching with that
+  window's snapping off, snap distance and gap while no window snaps, the
+  segment on a live mode, and the Nampower toggle while Nampower is not
+  loaded (it was clickable before). Toggling the controlling setting
+  updates its dependents immediately, without a page rebuild.
+- Saved profiles no longer keep a copy of the first window's settings at
+  the profile level. Every window owns its settings, and the copy, kept for
+  code from before multiple windows, is removed from the saved profile once
+  on load, along with the retired border on/off flag and the old refresh
+  and animation keys. The window border style is now the only border
+  setting. Profiles saved before 2.0 still load from their windows' own
+  settings; only the early adjustments of old default values are gone.
+- Switching settings pages no longer creates frames. Controls and sidebar
+  rows are pooled and rebound to the page being shown; the old dialog built
+  a fresh set of frames on every sidebar click and every refresh, and this
+  client never releases a frame. The scroll position resets to the top when
+  the page changes, and the dialog shows the addon version in its corner.
+  A combat switch redraws an open dialog once for every window instead of
+  once per renamed window, and a redraw of the page on screen keeps an
+  open dropdown open and a name being typed.
 
 ### Added
 

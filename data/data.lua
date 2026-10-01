@@ -50,7 +50,6 @@ Data.TrimHistory = DataSegments.TrimHistory
 
 Data.GetSegmentLabel = DataNavigation.GetSegmentLabel
 Data.GetSegmentChoices = DataNavigation.GetSegmentChoices
-Data.CycleSegment = DataNavigation.CycleSegment
 
 function Data:Initialize()
   local now = GetTime()
@@ -268,7 +267,6 @@ function Data:RecordDeath(targetName, now, killerName, killerSpell, targetGUID)
 end
 
 function Data:GetSelectedSet(selection)
-  selection = selection or Skada.db.profile.segment
   if selection == "total" then return self.total end
   if type(selection) == "number" then return self.history[selection] or self.current end
   return self.current

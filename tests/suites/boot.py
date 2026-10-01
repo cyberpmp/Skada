@@ -4,6 +4,38 @@ from harness import Context
 
 
 def run(ctx: Context):
+    ctx.run(r'''
+      -- The table shims must never probe through a metatable: Bagshui's rule
+      -- environment gives its item table an __index that asserts on any
+      -- miss and clears that table through table.getn/table.remove. Native
+      -- Lua 5.0 table functions are raw, so a shim that reads t[1] to find
+      -- the length trips the assertion (seen in game as blank bags and
+      -- "Components/Rules.lua:765: assertion failed!").
+      local strict = setmetatable({ name = "Hearthstone", quality = 1 }, {
+        __index = function(tbl, key) error("strict table probed for " .. tostring(key)) end,
+      })
+      assert(table.getn(strict) == 0, "hash-only strict table must read as empty")
+      table.insert(strict, "a")
+      table.insert(strict, "b")
+      assert(table.getn(strict) == 2)
+      assert(table.concat(strict, ",") == "a,b")
+      local first, second = unpack(strict)
+      assert(first == "a" and second == "b")
+      table.sort(strict, function(left, right) return left > right end)
+      assert(rawget(strict, 1) == "b" and rawget(strict, 2) == "a")
+      table.insert(strict, 1, "c")
+      assert(rawget(strict, 1) == "c" and table.getn(strict) == 3)
+      assert(table.remove(strict) == "a" and table.remove(strict, 1) == "c")
+      assert(table.getn(strict) == 1 and rawget(strict, 1) == "b")
+      table.setn(strict, 0)
+      assert(table.getn(strict) == 0 and rawget(strict, 1) == nil)
+      assert(rawget(strict, "name") == "Hearthstone", "hash part must survive array clearing")
+      local i
+      for i = table.getn(strict), 1, -1 do table.remove(strict, i) end
+      local k
+      for k in next, strict do rawset(strict, k, nil) end
+      assert(next(strict) == nil)
+    ''')
     skada = ctx.skada
     assert skada.initializerError is None, skada.initializerError
     assert skada.version == "1.0.0"

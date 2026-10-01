@@ -5,114 +5,51 @@ Skada.WindowConfig = WindowConfig
 
 local floor = math.floor
 local max = math.max
+local pairs = pairs
 local table_getn = table.getn
 local tonumber = tonumber
+
+local WINDOW_DEFAULTS = Skada.Defaults.window
 
 function WindowConfig.GetVisibleRowCount(config)
   return max(1, floor(tonumber(config and config.rows) or 1))
 end
 
-WindowConfig.keys = {
-  "visible", "locked", "width", "rows", "barHeight", "barSpacing",
-  "fontSize", "barAlpha", "windowOpacity", "mode", "segment", "point",
-  "relativePoint", "x", "y", "autoSwitch", "snap",
-  "snapDistance", "snapGap", "snapSize", "hideTitle", "combatMode",
-  "returnAfterCombat", "nameIsCustom",
-}
-
+-- Fills every window setting `target` has not stored: from `source` (the
+-- active window's settings, when a new window copies it) or else from
+-- Defaults.window.
 function WindowConfig.ApplyDefaults(target, source)
-  local keyIndex, key
-  for keyIndex = 1, table_getn(WindowConfig.keys) do
-    key = WindowConfig.keys[keyIndex]
-    if target[key] == nil then target[key] = source[key] end
+  -- A named window that never stored whether its name is its own: a name
+  -- that is not a mode title was typed by the player.
+  if target.nameIsCustom == nil and target.name then
+    target.nameIsCustom = not Skada.Modes:IsTitle(target.name)
   end
-  if target.visible == nil then target.visible = true end
-  if target.locked == nil then target.locked = false end
-  target.width = math.max((Skada.UIStyle and Skada.UIStyle.MIN_WINDOW_WIDTH) or 180, target.width or 240)
-  target.rows = target.rows or 10
-  target.barHeight = target.barHeight or 18
-  if target.barSpacing == nil then target.barSpacing = 2 end
-  target.fontSize = target.fontSize or 15
-  target.barAlpha = target.barAlpha or 0.90
-  target.windowOpacity = target.windowOpacity or 0.9
-  target.mode = target.mode or "damage"
-  target.segment = target.segment or "current"
+  local key, default
+  for key, default in pairs(WINDOW_DEFAULTS) do
+    if target[key] == nil and source then target[key] = source[key] end
+    if target[key] == nil then target[key] = default end
+  end
+  target.width = max(Skada.UIStyle.MIN_WINDOW_WIDTH, target.width)
   if Skada.Modes:Get(target.mode).live then target.segment = "current" end
-  target.point = target.point or "CENTER"
-  target.relativePoint = target.relativePoint or "CENTER"
-  target.x = target.x or 0
-  target.y = target.y or 0
-  if target.autoSwitch == nil then target.autoSwitch = true end
-  if target.snap == nil then target.snap = true end
-  if target.snapDistance == nil then target.snapDistance = 12 end
-  if target.snapGap == nil or target.snapGap == 4 then target.snapGap = 0 end
-  if target.snapSize == nil then target.snapSize = true end
-  if target.nameIsCustom == nil then
-    target.nameIsCustom = target.name ~= nil and not Skada.Modes:IsTitle(target.name)
-  end
-  if target.combatMode == nil then target.combatMode = "" end
-  if target.returnAfterCombat == nil then target.returnAfterCombat = false end
-  if target.nameIsCustom == nil then target.nameIsCustom = false end
 end
 
-function WindowConfig.SyncLegacy(manager, window)
-  if window ~= manager:GetPrimary() then return end
-  local profile = Skada.db.profile
-  local keyIndex, key
-  for keyIndex = 1, table_getn(WindowConfig.keys) do
-    key = WindowConfig.keys[keyIndex]
-    profile[key] = window.db[key]
-  end
-end
+-- The saved-profile format version (the field keeps its historical name).
+local PROFILE_VERSION = 8
 
+-- One-time conversions of saved profiles, oldest first. A fresh profile
+-- starts at the current version. Profiles older than 2.0 (version 4 and
+-- below, or none) skip straight to the 2.0-era steps: what those early
+-- steps did was nudge old default values, which nothing depends on.
 function WindowConfig.Migrate(profile)
-  local windowIndex
-  profile.updateRate = nil
-  profile.smoothBars = nil
-  profile.barSpeed = nil
-
-  for windowIndex = 1, table_getn(profile.windows or {}) do
-    profile.windows[windowIndex].visualVersion = nil
-  end
-
+  local windows = profile.windows or {}
+  local windowIndex, config
   if not profile.visualVersion then
-    if profile.width == 230 and profile.barHeight == 17 and profile.barSpacing == 1 then
-      profile.width, profile.barHeight, profile.barSpacing = 240, 18, 0
-    end
-    profile.fontSize, profile.barAlpha, profile.visualVersion = profile.fontSize or 14, profile.barAlpha or 0.78, 2
-    if profile.fontSize == 13 then profile.fontSize = 14 end
+    profile.visualVersion = table_getn(windows) == 0 and PROFILE_VERSION or 4
   end
 
-  if profile.visualVersion < 3 then
-    local config
-    for windowIndex = 1, table_getn(profile.windows or {}) do
-      config = profile.windows[windowIndex]
-      if config.fontSize == 14 then config.fontSize = 15 end
-      if config.barAlpha == 0.78 then config.barAlpha = 0.92 end
-    end
-    if profile.fontSize == 14 then profile.fontSize = 15 end
-    if profile.barAlpha == 0.78 then profile.barAlpha = 0.92 end
-    profile.visualVersion = 3
-  end
-
-  if profile.visualVersion < 4 then
-    local config
-    for windowIndex = 1, table_getn(profile.windows or {}) do
-      config = profile.windows[windowIndex]
-      if config.barSpacing == 0 then config.barSpacing = 2 end
-      if config.barAlpha == 0.92 then config.barAlpha = 0.90 end
-    end
-    if profile.barSpacing == 0 then profile.barSpacing = 2 end
-    if profile.barAlpha == 0.92 then profile.barAlpha = 0.90 end
-    profile.visualVersion = 4
-  end
-
+  -- The window border became a style; the old on/off flag picks it.
   if profile.visualVersion < 5 then
-    if profile.hideWindowBorder then
-      profile.windowBorderStyle = "none"
-    else
-      profile.windowBorderStyle = "solid"
-    end
+    profile.windowBorderStyle = profile.hideWindowBorder and "none" or "solid"
     profile.visualVersion = 5
   end
 
@@ -123,16 +60,49 @@ function WindowConfig.Migrate(profile)
   -- height the window was saved with keeps every window at its old size.
   if profile.visualVersion < 6 then
     local Style = Skada.UIStyle
-    local function keepWindowHeight(config)
-      if config.point ~= "BOTTOMLEFT" then return end
+    for windowIndex = 1, table_getn(windows) do
+      config = windows[windowIndex]
       local rows, barHeight, barSpacing = tonumber(config.rows), tonumber(config.barHeight), tonumber(config.barSpacing)
-      if not rows or not barHeight or not barSpacing or barHeight + barSpacing <= 0 then return end
-      local legacyHeight = (config.hideTitle and 0 or Style.HEADER_HEIGHT)
-        + rows * (barHeight + barSpacing) + Style.FOOTER_HEIGHT
-      config.rows = Style:GetRowsForHeight(config, legacyHeight)
+      if config.point == "BOTTOMLEFT" and rows and barHeight and barSpacing and barHeight + barSpacing > 0 then
+        local savedHeight = (config.hideTitle and 0 or Style.HEADER_HEIGHT)
+          + rows * (barHeight + barSpacing) + Style.FOOTER_HEIGHT
+        config.rows = Style:GetRowsForHeight(config, savedHeight)
+      end
     end
-    for windowIndex = 1, table_getn(profile.windows or {}) do keepWindowHeight(profile.windows[windowIndex]) end
-    keepWindowHeight(profile)
     profile.visualVersion = 6
+  end
+
+  -- Snap distance and gap became one setting for every window, edited on
+  -- General, which reads the primary window. Older profiles may hold a
+  -- different hidden value per window; give every window the primary's so
+  -- the slider tells the truth. The retired default gap of 4 becomes 0.
+  if profile.visualVersion < 7 then
+    local primary = windows[1]
+    if primary then
+      local distance, gap = primary.snapDistance, primary.snapGap
+      if gap == 4 then gap = 0 end
+      for windowIndex = 1, table_getn(windows) do
+        config = windows[windowIndex]
+        config.snapDistance, config.snapGap = distance, gap
+      end
+    end
+    profile.visualVersion = 7
+  end
+
+  -- The profile used to mirror the first window's settings for code that
+  -- predated multiple windows, and carried flags since retired. Each
+  -- window owns its settings now; drop the copies and the retired flags.
+  if profile.visualVersion < 8 then
+    local key
+    for key in pairs(WINDOW_DEFAULTS) do profile[key] = nil end
+    profile.hideWindowBorder = nil
+    profile.updateRate, profile.smoothBars, profile.barSpeed = nil, nil, nil
+    profile.returnAfterCombat = nil
+    for windowIndex = 1, table_getn(windows) do
+      config = windows[windowIndex]
+      config.visualVersion = nil
+      config.returnAfterCombat = nil
+    end
+    profile.visualVersion = 8
   end
 end

@@ -174,23 +174,23 @@ Hidden windows do not request continuous rendering.
 ### Window configuration
 
 Each window owns mode, segment, geometry, visibility, lock, auto-switch, and
-snap settings. `ui/ui.config.lua` is the only owner of the mirrored key list,
-default application, migration, and primary-window compatibility mirror.
+snap settings, stored on `profile.windows[n]` only; the profile keeps no
+copy. `core/core.defaults.lua` holds the window defaults (`Defaults.window`)
+beside the profile-wide ones, and `ui/ui.config.lua` applies them (a new
+window copies the active window instead) and owns the saved-profile
+migration, whose last step dropped the old profile-level copies.
 
-After changing a per-window key, call `UI:SyncLegacy(window)`. Only the primary
-window is mirrored into the historical profile fields. Appearance and data
-settings that intentionally apply to every window remain on the global profile.
+After changing a per-window key, call `UI:NotifyWindowChanged(window)`: it
+publishes `windowSettingsChanged`, which repaints an open settings page.
+Appearance and data settings that apply to every window live on the profile.
 
 ### Settings
 
 The settings dialog is Skada's own (`options/options.dialog.lua` for the
 chrome, sidebar and pane, `options/options.controls.lua` for the control
 renderers), built directly on this client's frame APIs — no widget library.
-It replaced the vendored Ace3 stack under `libs/` (now deleted), whose every
-rendering symptom here — blank EditBox values, an unscrolling scroll frame,
-strata/level inversions, single-column panes — was a repair job in
-`core/core.compat.lua`. Two design decisions bury the worst bug classes at
-the root: sliders have NO value EditBox (the value lives in a plain
+Two design decisions bury the worst bug classes of this client at the
+root: sliders have NO value EditBox (the value lives in a plain
 FontString, which cannot come up blank), and the dialog's layout is pure
 arithmetic (nothing reads a rendered rect, so there is no reflow and a
 control is laid out correctly the first time it is built).
@@ -216,30 +216,76 @@ reparenting. The same gap applies to Blizzard's shared `ColorPickerFrame`:
 the compat layer hooks its OnShow to carry its layering down to its
 Okay/Cancel children (toplevel off while shown, restored on hide).
 
-The dialog root is a fixed 769×560 frame at HIGH strata — above the meter
+The dialog root is a fixed 769×640 frame at HIGH strata — above the meter
 windows (LOW) and the normal UI (MEDIUM), below DIALOG where the StaticPopup
 confirmations for delete/reset live — not toplevel, `SkadaCompat.FixLevels`
 applied after every build. Its chrome is the default UI's own: the untinted
 dialog-box frame and header ribbon (`Style:ApplyDialogFrame`,
-`Style:CreateDialogTitle`), tooltip-bordered inset panes for the sidebar
-and the scroll pane (`Style:ApplyPane`), a red panel Close button and the
-round panel X. The sidebar's rows are built from scratch (167x18 buttons
-with the quest-log highlight on hover, the same highlight held lit with
-gold text on the selected row): a General row, a mouse-disabled Windows header whose
-right edge carries the plus button that creates a window
-(`Skada.UI:CreateNew()` then `Options:SelectWindow`), and one indented row
-per meter window. The pane is a NAMED ScrollFrame from
+`Style:CreateDialogTitle`), one shared surface inside it — the sidebar and
+the pane carry no backdrop of their own, a 1-unit hairline (`Style.RULE_*`)
+divides them — a red panel Close button with the addon version beside it, the round panel X, and a title-row button at the
+pane's top-right (level with the page name, a root child so it rides above
+the scroll frame) bound to the page's `placement = "title"` spec (Delete
+window) and hidden on pages without one — the action sits with the page it
+acts on and never scrolls away. The sidebar
+holds four kinds of row (167x18 buttons with the quest-log highlight on
+hover, the same highlight held lit with gold text on the selected row): the
+three profile pages General, Appearance and Data; a mouse-disabled Windows
+header whose right edge carries the plus button that creates a window
+(`Skada.UI:CreateNew()` then `Options:SelectWindow`); and one indented row
+per meter window. Rows are pooled and rebound on every rebuild, never
+recreated. The pane is a NAMED ScrollFrame from
 `UIPanelScrollFrameTemplate` — the template's own `<name>ScrollBar` drives
 clipping and the scroll range natively, the mouse wheel is wired by hand
 (the template omits it here) — with an explicit-size, anchorless scroll
 child re-handed over via `SetScrollChild` after every height change plus
 `UpdateScrollChildRect` (the client fixes the scroll range at SetScrollChild
-time). Frame scripts are chained through `SkadaCompat.AppendScript`, never
-`HookScript`: the client's HookScript runs the original handler without its
-positional arguments, and the harness lints Skada's own files for it.
+time); the scroll position resets to the top when the page changes, and the
+scrollbar is hidden (wheel ignored) whenever the page's arithmetic height
+fits the view, which every stock page does. Frame
+scripts are chained through `SkadaCompat.AppendScript`, never `HookScript`:
+the client's HookScript runs the original handler without its positional
+arguments, and the harness lints Skada's own files for it.
 
-`options/options.controls.lua` renders the eight leaf types the schema
-emits, one frame per spec, each carrying a back-reference to its spec:
+The pane's layout is a row flow with two rules, both owned by the renderers
+(`Controls.COLUMNS`, `Controls.ROW_KIND`): a control takes the 510-unit
+content width divided by its type's column count (three for toggles,
+swatches, dropdowns and sliders, two for the name box; headings, the page
+title, notes, links and buttons span the row), and a row only ever
+holds controls of one row kind, so check boxes line up beside check boxes
+and sliders beside sliders (toggles and swatches share a kind, being the
+same glyph-and-label shape). A spec may force a fresh row with
+`newRow = true`. Every page opens with a `title` row built from the group's
+`name` and `desc`, and a heading gets extra air above it so sections read
+as blocks.
+
+`options/options.controls.lua` renders the leaf types the schema emits.
+Frames are pooled per parent and type: a renderer is `create` (build the
+frame and its regions once), `bind` (point an existing frame at a spec —
+labels, geometry for the cell width, tooltip) and `refresh` (repaint from
+the spec's current value and `disabled` state). `Controls.Render` hands out
+a pooled frame or creates one, `Controls.Release` returns it, so switching
+pages allocates nothing once each type has been seen (a frame on this
+client is never released — the old build-per-visit leaked a page of frames
+on every sidebar click). Each frame carries `spec` as a plain field. A
+page rebuilt in place (a window renamed itself) releases its frames
+last-first, so every option gets the frame it had back, an open dropdown
+stays open and a name being typed keeps its text and focus. Every commit
+calls the dialog's commit listener, which refreshes the page's other
+controls so dependents follow live; a slider notifies once, when the drag
+ends, and a spec marked `commitOnRelease` (Saved fights, whose setter
+deletes fights) writes only the value the drag ends on. A spec's
+`disabled` (a boolean or a function) dims the control to 45% alpha, and
+every click asks the spec again rather than trusting the last paint — the
+custom bar color behind the class-colors toggle, the border color behind
+the border style, size matching behind a window's snap toggle, snap
+distance and gap while no window snaps, the segment behind a live mode,
+the Nampower toggle while Nampower is absent. Changes made outside the
+dialog reach an open page through the `windowSettingsChanged` bus event
+(published by `UI:NotifyWindowChanged`, which every window-settings path
+calls), which repaints values and dimming in place; `Options:BeginBatch`
+/`EndBatch` fold the redraws of a multi-window change (combat switching)
+into one.
 
 - **toggle/select/color** — the default UI's check box, dropdown
   (UIDropDownMenuTemplate's art under a gold caption) and chat color
@@ -249,8 +295,9 @@ emits, one frame per spec, each carrying a back-reference to its spec:
 - **range** — a from-scratch Slider frame (1.12 has no slider template)
   using the backdrop/thumb texture recipe proven in game, with the current
   value shown as a plain text label beside the gold caption and a `setup`
-  re-entrancy flag around programmatic `SetValue` (the real client fires
-  OnValueChanged for every programmatic SetValue);
+  re-entrancy flag around programmatic `SetValue`, `SetMinMaxValues` and
+  `SetValueStep` (the real client fires OnValueChanged for every
+  programmatic change);
 - **color** — a swatch button configuring Blizzard's shared
   `ColorPickerFrame`, level-bumped above the dialog and re-layered through
   the compat hook before `Show()`;
@@ -259,26 +306,49 @@ emits, one frame per spec, each carrying a back-reference to its spec:
   set at build time: the value is queued and a one-shot plain-Frame driver
   applies it once a render pass has placed the box (`GetLeft` answers
   non-nil; OnUpdate does not fire on EditBox frames here, and the dialog's
-  arithmetic layout never reflows, so one placement suffices). Enter
-  commits, Escape reverts to the last committed value;
-- **execute/header** — a red panel button (UIPanelButtonTemplate, routed
-  through StaticPopup confirmations; a full-width row keeps it at a
-  button's width) and the classic centered gold heading with a
-  tooltip-border line out to each edge.
+  arithmetic layout never reflows, so one placement suffices). A refresh
+  requeues only when the stored value differs from what was last displayed,
+  so a commit elsewhere on the page never clobbers text being typed. Enter
+  commits a changed value (an unchanged one is not a rename), then shows
+  what was stored; Escape reverts to the last committed value. A box
+  released with its page gives up keyboard focus;
+- **execute/header/title/note** — a red panel button
+  (UIPanelButtonTemplate, routed through StaticPopup confirmations; a
+  full-width row keeps it at a button's width), a left-aligned gold
+  heading with one muted hairline trailing to the right edge, the page title in
+  the large gold font over a muted description, and a muted one-line note.
+  A spec with `placement = "title"` (Delete window) is not flowed into the
+  page: the dialog binds it to the red button on the title row.
 
-`options/options.schema.lua` builds the whole options table fresh on every
-call to `Schema:BuildOptions()` — a root group with a `general` group (every
-global-profile row) and a `windows` group. The `windows` group's `args`
-holds one nested group per meter window, keyed `window_<id>`, and nothing
-else; each window's own group is built by `Schema:BuildWindowArgs(window)`,
-whose `get`/`set` closures capture that specific `window` directly — there
-is no shared "currently selected window" for these to resolve, since every
-window's subgroup is rebuilt per pane. In the sidebar the Windows node is a
-header rather than a page. `options/options.lua` is the public API other
-code calls (`Open`/`Close`/`Toggle`/`SelectWindow`/`CycleWindow`/`Refresh`)
-plus `selectedWindow` (which window's border is highlighted on screen and
-which pane `SelectWindow`/`CycleWindow` navigate to) and the minimap
-button.
+`options/options.schema.lua` is the data contract. `Schema:BuildGroup(key)`
+builds one page fresh — `general`, `appearance`, `data` or a window page
+key (`Schema.WindowPageKey`, `window_<id>`) — and is what the dialog calls;
+`Schema.PAGES` is the one list of profile pages the sidebar and the
+schema both read; `Schema:BuildOptions()` builds the whole tree
+(the three pages in `Schema.PAGES` order plus a `windows` group whose
+`args` holds one nested group per meter window, keyed `window_<id>`, and
+nothing else) for tests and tooling. Pages follow ownership: General is how
+Skada behaves (tracking, minimap, combat-file logging, and window snapping
+distance and gap — stored on every window but edited
+once through `Schema.SnapSet`, which writes every window and the profile;
+profile migration 7 gave older profiles' windows the primary's values),
+Appearance is the one look every window shares (window border, bar texture/font/number
+format/borders, class and spell colors, own-row highlight), Data is what is
+kept and when it is cleared (history size, boss-only retention, the reset
+button, the three automatic-reset policies). A window's page holds only the
+keys stored on that window, in three sections that fit the 552-unit pane
+without scrolling — Window (name, visible, locked, title bar, snap, match
+size when snapped), Display (mode, segment, combat mode, automatic
+segments) and Layout (width, rows, bar height and
+spacing, font size, bar and window opacity) — with the delete button on
+the title row and a subtitle pointing at Appearance for the shared look. Each window's group is built by
+`Schema:BuildWindowArgs(window)`, whose `get`/`set` closures capture that
+specific `window` directly — there is no shared "currently selected window"
+for these to resolve. In the sidebar the Windows node is a header rather
+than a page. `options/options.lua` is the public API other code calls
+(`Open`/`Close`/`Toggle`/`SelectWindow`/`CycleWindow`/`Refresh`) plus
+`selectedWindow` (which window's border is highlighted on screen and which
+page `SelectWindow`/`CycleWindow` navigate to) and the minimap button.
 
 Whenever the window list changes, a window is renamed, or a mode switch
 auto-renames a window, call `Schema:NotifyChanged()`, which funnels into

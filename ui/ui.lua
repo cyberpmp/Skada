@@ -133,16 +133,23 @@ function UI:Forward()
   Skada:MarkDirty()
 end
 
+-- A segment picked by hand (the meter's segment list, the settings
+-- dialog). Mid-fight it is the player's choice, like a mode picked by hand:
+-- the segment a combat mode would hand back is dropped, so combat end
+-- keeps it.
+function UI:ChooseSegment(segment)
+  self.db.segment = segment
+  if Skada.Data.clientInCombat then self.db.restoreSegment = nil end
+  self.manager:NotifyWindowChanged(self)
+end
+
 function UI:SelectEntry(entry)
   if not entry then return end
   if entry.modeKey then
+    -- Setting the mode also resets the view to it and notifies.
     Skada.Modes:Set(entry.modeKey, self)
-    self.manager:SyncLegacy(self)
-    self:SetView("mode")
   elseif entry.segment ~= nil then
-    self.db.segment = entry.segment
-    self.manager:SyncLegacy(self)
-
+    self:ChooseSegment(entry.segment)
     self:SetView("modes")
   elseif entry.actor and not entry.spell then
     local mode = Skada.Modes:Get(self.db.mode)
@@ -268,16 +275,9 @@ function UI:InitializeWindow(config)
   header:RegisterForClicks("LeftButtonUp", "RightButtonUp")
   header:RegisterForDrag("LeftButton")
 
-  local headerTexture = header:CreateTexture(nil, "BACKGROUND")
-  self.headerTexture = headerTexture
-  headerTexture:SetAllPoints(header)
-
-  local headerRule = header:CreateTexture(nil, "ARTWORK")
-  self.headerRule = headerRule
-  headerRule:SetTexture(Style.WHITE)
-  headerRule:SetHeight(1)
-  headerRule:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -2)
-  headerRule:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, -2)
+  -- The title row draws no strip of its own: the window backdrop is the
+  -- only background, so the title and its buttons sit directly on it (a
+  -- separate tinted band read as a ghost bar at low window opacity).
   Style:ApplyHeader(self)
 
   local menuButton = UIReport:CreateHeaderButton(header, {
@@ -301,7 +301,7 @@ function UI:InitializeWindow(config)
       owner.db.autoSwitch = not owner.db.autoSwitch
       if owner.db.autoSwitch then owner:ApplyCombatState(Skada.Data.clientInCombat) end
       Style:SetButtonActive(owner.autoButton, owner.db.autoSwitch, 0.20, 1, 0.20)
-      owner.manager:SyncLegacy(owner)
+      owner.manager:NotifyWindowChanged(owner)
       Skada:MarkDirty()
     end,
     rightClick = goBack,
@@ -402,8 +402,11 @@ function UI:InitializeWindow(config)
   self:Refresh()
 end
 
-function UI:SyncLegacy(window)
-  return WindowConfig.SyncLegacy(self, window)
+-- Every code path that changes a window's settings calls this (meter
+-- menus, slash commands, combat switching, the settings dialog), so an
+-- open settings page hears that its values or dimming may be stale.
+function UI:NotifyWindowChanged(window)
+  Skada:Publish("windowSettingsChanged", window)
 end
 
 function UI:GetPrimary()
@@ -468,7 +471,6 @@ function UI:CreateWindow(config)
     scrollOffset = 0,
     displayCount = 0,
   }, windowMeta)
-  applyWindowDefaults(config, Skada.db.profile)
   table.insert(self.windows, window)
   self.byID[config.id] = window
   local ok, message = pcall(window.InitializeWindow, window, config)
@@ -485,7 +487,7 @@ function UI:CreateNew(name)
   local windowId = profile.nextWindowID or 2
   profile.nextWindowID = windowId + 1
   local config = { id = windowId }
-  applyWindowDefaults(config, source and source.db or profile)
+  applyWindowDefaults(config, source and source.db)
   config.name = name and name ~= "" and name or Skada.Modes:Get(config.mode).title
   config.nameIsCustom = name ~= nil and name ~= ""
   config.visible = true
@@ -493,6 +495,11 @@ function UI:CreateNew(name)
   config.y = (source and source.db.y or 0) - 28
   config.segment = Skada.Data.clientInCombat and "current" or "total"
   if Skada.Modes:Get(config.mode).live then config.segment = "current" end
+  -- A copy made mid-fight of a window on its combat mode inherits the way
+  -- back too, or it would stay on the combat mode for good.
+  if source and source.db.restoreMode then
+    config.restoreMode, config.restoreSegment = source.db.restoreMode, source.db.restoreSegment
+  end
   table.insert(profile.windows, config)
   local window = self:CreateWindow(config)
   self:SetActive(window)
@@ -524,7 +531,6 @@ function UI:DeleteWindow(window)
   end
   self.activeWindow = self:GetPrimary()
   self:SetActive(self.activeWindow, replaceVisualSelection and true or nil)
-  self:SyncLegacy(self:GetPrimary())
   Skada:MarkDirty()
   Skada:Print("Removed window " .. tostring(window.db.id) .. ".")
   Skada:Publish("windowListChanged", self)
@@ -540,6 +546,63 @@ function UI:RequestDelete(window)
   else
     self:DeleteWindow(window)
   end
+end
+
+local function applyVisible(window, visible)
+  window.db.visible = visible
+  if window.frame then
+    if visible then window.frame:Show() else window.frame:Hide() end
+  end
+  if not visible and window.actionMenu then window.actionMenu:Hide() end
+  window.layoutDirty = true
+end
+
+-- Shows or hides one window: the saved flag, the frame and an open
+-- settings page. An explicit choice also forgets that the show/hide-all
+-- toggle hid it.
+function UI:SetWindowVisible(window, visible)
+  if not window then return end
+  window.db.hiddenByToggle = nil
+  applyVisible(window, visible and true or false)
+  self:NotifyWindowChanged(window)
+  Skada:MarkDirty()
+end
+
+-- Shows or hides every window together: hide all while any is shown, then
+-- show back exactly the windows that hid, so a window hidden on purpose
+-- stays hidden. Each window keeps its own `visible` flag, so its settings
+-- page stays truthful, and the mark rides in its saved settings, so it
+-- survives a /reload.
+function UI:ToggleAllWindows()
+  local anyShown, anyMarked = false, false
+  local windowIndex, window
+  for windowIndex = 1, table_getn(self.windows) do
+    -- A window that failed to build is never shown or hidden below, so
+    -- its stale `visible` flag must not count, or every click hides.
+    window = self.windows[windowIndex]
+    if not window.broken then
+      if window.db.visible then anyShown = true end
+      if window.db.hiddenByToggle then anyMarked = true end
+    end
+  end
+  for windowIndex = 1, table_getn(self.windows) do
+    window = self.windows[windowIndex]
+    if not window.broken then
+      if anyShown then
+        if window.db.visible then
+          window.db.hiddenByToggle = true
+          applyVisible(window, false)
+        end
+      else
+        -- Nothing marked (every window was hidden one by one): show all.
+        if window.db.hiddenByToggle or not anyMarked then applyVisible(window, true) end
+        window.db.hiddenByToggle = nil
+      end
+    end
+  end
+  self:NotifyWindowChanged()
+  Skada:MarkDirty()
+  return not anyShown
 end
 
 function UI:RefreshAll()
@@ -558,21 +621,36 @@ function UI:RefreshAll()
   self.hasActiveAnimations = hasAnimations
 end
 
+-- A combat mode is a round trip: the window switches to it when combat
+-- starts and comes back to the mode it had when combat ends. (Staying on
+-- the combat mode afterwards was a second toggle that asked the same
+-- question twice; a window that should always show a mode just sets it.)
+--
+-- The way back (mode and segment) is saved on the window's own settings,
+-- not held at runtime: db.mode already holds the combat mode mid-fight, so a
+-- /reload there must still know where to return. The segment rides along
+-- because a live combat mode forces "current", which would otherwise
+-- silently unpin a window parked on Overall or a saved fight.
 function UI:ApplyCombatState(inCombat)
-  local combatMode = self.db.combatMode
+  local db = self.db
+  local combatMode = db.combatMode
   local renamed = false
-  if inCombat and combatMode and combatMode ~= "" and combatMode ~= self.db.mode then
-    if self.db.returnAfterCombat and not self.restoreMode then
-      self.restoreMode = self.db.mode
+  if inCombat and combatMode and combatMode ~= "" and combatMode ~= db.mode then
+    if not db.restoreMode then
+      db.restoreMode, db.restoreSegment = db.mode, db.segment
     end
     local _, modeRenamed = Skada.Modes:Set(combatMode, self)
     renamed = modeRenamed
-  elseif not inCombat and self.restoreMode then
-    local _, modeRenamed = Skada.Modes:Set(self.restoreMode, self)
+  elseif not inCombat and db.restoreMode then
+    local restoreMode, restoreSegment = db.restoreMode, db.restoreSegment
+    db.restoreMode, db.restoreSegment = nil, nil
+    local _, modeRenamed = Skada.Modes:Set(restoreMode, self)
     renamed = modeRenamed
-    self.restoreMode = nil
+    if not db.autoSwitch and not Skada.Modes:Get(db.mode).live and restoreSegment ~= nil
+        and (type(restoreSegment) ~= "number" or Skada.Data.history[restoreSegment]) then
+      db.segment = restoreSegment
+    end
   end
-  if inCombat and not self.db.returnAfterCombat then self.restoreMode = nil end
   if Skada.Modes:Get(self.db.mode).live then self.db.segment = "current" end
   if not self.db.autoSwitch then return renamed end
   if not Skada.Modes:Get(self.db.mode).live then
@@ -581,20 +659,33 @@ function UI:ApplyCombatState(inCombat)
   self.detailActor = nil
   self.view = "mode"
   self.scrollOffset = 0
-  self.manager:SyncLegacy(self)
+  self.manager:NotifyWindowChanged(self)
   return renamed
 end
 
-function UI:OnCombatState(inCombat)
+-- Every window switches at once; an open settings dialog redraws once for
+-- the lot (each auto-named window's rename would otherwise rebuild it).
+local function applyCombatStateToAll(manager, inCombat)
   local windowIndex, renamed
   renamed = false
-  for windowIndex = 1, table_getn(self.windows) do
-    if self.windows[windowIndex]:ApplyCombatState(inCombat) then renamed = true end
+  for windowIndex = 1, table_getn(manager.windows) do
+    if manager.windows[windowIndex]:ApplyCombatState(inCombat) then renamed = true end
   end
   Skada:MarkDirty()
   if renamed and Skada.OptionsSchema then
     Skada.OptionsSchema:NotifyChanged()
   end
+end
+
+function UI:OnCombatState(inCombat)
+  local options = Skada.Options
+  if not options then return applyCombatStateToAll(self, inCombat) end
+  options:BeginBatch()
+  -- An error must not leave the dialog's batch open (it would never
+  -- redraw again); close it, then let the error surface as before.
+  local ok, message = pcall(applyCombatStateToAll, self, inCombat)
+  options:EndBatch()
+  if not ok then error(message, 0) end
 end
 
 function UI:ResetViews(resetSegments)
@@ -612,7 +703,7 @@ function UI:ResetViews(resetSegments)
       end
     end
   end
-  self:SyncLegacy(self:GetPrimary())
+  self:NotifyWindowChanged()
 end
 
 function UI:MarkLayouts()
@@ -636,7 +727,16 @@ function UI:Initialize()
     }
     StaticPopupDialogs.SKADA_RESET_POLICY = {
       text = "Reset Skada data for the new encounter context?", button1 = YES or "Yes", button2 = NO or "No",
-      OnAccept = function() Skada.Data:Reset() end, timeout = 0, whileDead = 1, hideOnEscape = 1,
+      -- The popup can sit unanswered into a pull; an automatic reset never
+      -- runs mid-fight, even when accepted then.
+      OnAccept = function()
+        if Skada.Data.active then
+          Skada:Print("A fight is in progress; data not reset.")
+          return
+        end
+        Skada.Data:Reset()
+      end,
+      timeout = 0, whileDead = 1, hideOnEscape = 1,
     }
   end
 
@@ -646,7 +746,7 @@ function UI:Initialize()
 
   if table_getn(profile.windows) == 0 then
     local first = { id = 1 }
-    applyWindowDefaults(first, profile)
+    applyWindowDefaults(first)
     first.name = Skada.Modes:Get(first.mode).title
     profile.windows[1] = first
   end
@@ -657,7 +757,7 @@ function UI:Initialize()
     config = profile.windows[windowIndex]
     config.id = config.id or windowIndex
     config.name = config.name or (config.id == 1 and "Skada" or ("Skada " .. config.id))
-    applyWindowDefaults(config, profile)
+    applyWindowDefaults(config)
     window = self:CreateWindow(config)
     if config.id > highest then highest = config.id end
     if config.id == profile.selectedWindowID then self.activeWindow = window end

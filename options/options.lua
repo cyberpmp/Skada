@@ -48,6 +48,16 @@ function Options:Refresh()
   Dialog:Refresh()
 end
 
+-- Holds the open dialog's redraws until the matching EndBatch, then does
+-- at most one: for callers that change several windows in one go.
+function Options:BeginBatch()
+  Dialog:BeginBatch()
+end
+
+function Options:EndBatch()
+  Dialog:EndBatch()
+end
+
 function Options:Toggle()
   if Dialog.IsOpen() then
     Dialog:Close()
@@ -65,7 +75,7 @@ function Options:SelectWindow(window)
   if not window then return end
   self.selectedWindow = window
   Skada.UI:SetActive(window, true)
-  Dialog:Open("window_" .. tostring(window.db.id))
+  Dialog:Open(Schema.WindowPageKey(window))
   self.frame = Dialog.Frame()
 end
 
@@ -99,4 +109,10 @@ Skada:RegisterInitializer(function() Options:Initialize() end, "options panel")
 Skada:Subscribe("windowListChanged", function()
   Options:GetCurrentWindow() -- self-heals and re-caches selectedWindow if it was deleted
   Schema:NotifyChanged()
+end)
+
+-- A window setting changed somewhere (a meter menu, a slash command,
+-- combat switching): repaint the open page's values and dimming in place.
+Skada:Subscribe("windowSettingsChanged", function()
+  Dialog:RepaintControls()
 end)

@@ -27,9 +27,10 @@ minimal presentation.
 
 ### Configure each window in-game
 
-The native settings panel separates addon-wide appearance and data behavior
-from each meter's mode, data source, automatic switching, and layout options.
-Changes apply immediately, without an external configuration framework.
+The native settings panel keeps addon-wide behavior, appearance and data
+retention on three short pages and gives each meter window its own page for
+mode, data source, automatic switching and layout. Changes apply
+immediately, without an external configuration framework.
 
 <p align="center">
   <a href="docs/images/skada-settings.png">
@@ -107,12 +108,14 @@ saved-fight segments.
 
 The gear button opens window actions for settings, combat logging, reporting,
 creating or removing windows, and resetting fight data. Dragged windows can
-snap to screen edges or other visible Skada windows; the distance, gap, and
-size matching behavior are configured per window.
+snap to screen edges or other visible Skada windows. Snapping and size
+matching are switched per window; the snap distance and gap are one setting
+for every window, under General.
 
 ### Minimap button
 
-- Left-click: show or hide the active meter window.
+- Left-click: hide every meter window, or show back the ones it hid (a
+  window you hid yourself stays hidden).
 - Right-click: open or close settings.
 - Shift-left-click: request a full data reset.
 - Drag: reposition the button around the minimap.
@@ -129,13 +132,27 @@ size matching behavior are configured per window.
 
 ## Settings
 
-The settings panel applies changes immediately and is organized into two
-areas:
+The settings panel applies changes immediately. Its sidebar holds three
+pages for everything that applies to the whole addon, then one entry per
+meter window:
 
-- **General** contains every addon-wide behavior, appearance, data-retention,
-  formatting, and reset setting.
-- **Windows** contains one entry per meter window and only controls that
-  window's behavior, dimensions, typography, mode, segment, and snapping.
+- **General**: how Skada tracks combat (pet merging, tracking outside the
+  group, Nampower events), the minimap button, combat-file logging, and the
+  snap distance and gap every window uses.
+- **Appearance**: the one look every window shares: window border, bar
+  texture, font and number format, bar borders, class and spell colors, and
+  the highlight on your own row.
+- **Data**: how many fights are kept, boss-only retention, the reset button
+  and the automatic-reset policies.
+- **Windows**: each window's own page, which fits without scrolling: name,
+  visibility and lock, snapping on or off, mode, segment and combat
+  switching, size, rows, font size, bar and window opacity. Delete sits at
+  the top of the page beside the window's name. Colors and fonts are not
+  here on purpose; the page says where they are.
+
+Settings that do not apply right now are dimmed rather than hidden (the
+custom bar color while class colors are on, size matching while snapping
+is off), so nothing moves around as you toggle things.
 
 Reset policies can ask, always reset, or never reset when entering an instance,
 joining a group, or leaving a group. Skada never applies an automatic reset

@@ -138,21 +138,6 @@ function Modes:GetDetailText(mode, spell, actor, set, setDuration)
   return Skada:FormatNumber(value) .. " (" .. formatPercentPart(value, total) .. ")"
 end
 
-function Modes:Cycle(direction, window)
-  window = window or (Skada.UI and Skada.UI.GetActive and Skada.UI:GetActive())
-  local config = window and window.db or Skada.db.profile
-  local current = config.mode
-  local index = 1
-  local modeIndex
-  for modeIndex = 1, table_getn(self.list) do
-    if self.list[modeIndex].key == current then index = modeIndex break end
-  end
-  index = index + (direction or 1)
-  if index > table_getn(self.list) then index = 1 end
-  if index < 1 then index = table_getn(self.list) end
-  return self:Set(self.list[index].key, window)
-end
-
 function Modes:IsTitle(name)
   local modeIndex
   for modeIndex = 1, table_getn(self.list) do
@@ -168,9 +153,8 @@ function Modes:IsAutoNamed(config)
 end
 
 function Modes:Set(value, window)
-  if not value then return false, false end
-  window = window or (Skada.UI and Skada.UI.GetActive and Skada.UI:GetActive())
-  local config = window and window.db or Skada.db.profile
+  if not value or not window then return false, false end
+  local config = window.db
   local lowered = string.lower(value)
   local modeIndex, mode
   for modeIndex = 1, table_getn(self.list) do
@@ -179,7 +163,7 @@ function Modes:Set(value, window)
       config.mode = mode.key
       if mode.live then config.segment = "current" end
       local renamed = false
-      if window and window.db == config and self:IsAutoNamed(config) and config.name ~= mode.title then
+      if self:IsAutoNamed(config) and config.name ~= mode.title then
         config.name = mode.title
         if window.title then
           window.title:SetText(config.name)
@@ -188,9 +172,10 @@ function Modes:Set(value, window)
         Skada:Publish("windowListChanged", Skada.UI)
         renamed = true
       end
-      if window and window.db == config and Skada.Data and Skada.Data.clientInCombat
-          and mode.key ~= config.combatMode then
-        window.restoreMode = nil
+      -- A mode picked by hand mid-fight is the player's choice: drop the
+      -- way back so combat end does not undo it.
+      if Skada.Data and Skada.Data.clientInCombat and mode.key ~= config.combatMode then
+        config.restoreMode, config.restoreSegment = nil, nil
       end
       DataNavigation:OnModeChanged(window)
       Skada:MarkDirty()

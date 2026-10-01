@@ -350,8 +350,7 @@ function objectMethods:GetName() return rawget(self, "name") end
 
 -- Slider frames. The real client fires OnValueChanged for EVERY SetValue,
 -- programmatic ones included, so callers that must not loop wrap their
--- SetValue in a `setup` re-entrancy flag (the vendored AceGUI Slider
--- widget's pattern, kept for Skada's own sliders); the stub reproduces that
+-- SetValue in a `setup` re-entrancy flag; the stub reproduces that
 -- contract, skipping the script only while the flag is set.
 function objectMethods:SetMinMaxValues(minValue, maxValue)
   rawset(self, "stubMinValue", minValue)

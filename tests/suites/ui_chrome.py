@@ -46,10 +46,12 @@ def run(ctx: Context):
       assert(meter.autoButton.skadaActive and not rawget(meter.autoButton, "activeMarker"))
       assert(meter.autoButton.text.textR == 0.2 and meter.autoButton.text.textG == 1 and
         meter.autoButton.text.textB == 0.2)
-      assert(meter.headerRule and
-        meter.headerRule.alpha == 0.20 * meter.db.windowOpacity,
+      -- The title row draws no strip or rule of its own: the window
+      -- backdrop is the only background behind the title and its buttons.
+      assert(not rawget(meter, "headerTexture") and not rawget(meter, "headerRule"),
+        "the title row must not draw its own background")
+      assert(meter.title.textR == 0.76 and meter.title.textG == 0.79 and meter.title.textB == 0.84,
         "meter loaded with settings-selection chrome")
-      assert(meter.title.textR == 0.76 and meter.title.textG == 0.79 and meter.title.textB == 0.84)
 
       local menu = meter.actionMenu
       assert(menu and not menu:IsShown())
@@ -109,14 +111,12 @@ def run(ctx: Context):
       local opacity = meter.db.windowOpacity
       assert(meter.frame.skadaBg and meter.frame.skadaBg.alpha == opacity,
         "window fill does not follow window opacity")
-      assert(meter.headerTexture.alpha == 0.92 * opacity,
-        "header texture does not follow window opacity")
       assert(meter.rows[1].background.alpha == 0.94 * opacity,
         "row back does not follow window opacity")
       meter.db.windowOpacity = 0
       meter.layoutDirty = true
       meter:Refresh()
-      assert(meter.frame.skadaBg.alpha == 0 and meter.headerTexture.alpha == 0,
+      assert(meter.frame.skadaBg.alpha == 0,
         "0% window opacity must leave no background")
       meter.db.windowOpacity = 0.9
       meter.layoutDirty = true
@@ -134,10 +134,11 @@ def run(ctx: Context):
         windows = {},
       }
       Skada.WindowConfig.Migrate(bordered)
-      assert(bordered.visualVersion == 6 and bordered.windowBorderStyle == "solid",
+      assert(bordered.visualVersion == 8 and bordered.windowBorderStyle == "solid",
         "existing bordered profile kept the default grey glow")
-      assert(bordered.updateRate == nil and bordered.smoothBars == nil and bordered.barSpeed == nil,
-        "obsolete refresh and animation settings survived migration")
+      assert(bordered.updateRate == nil and bordered.smoothBars == nil and bordered.barSpeed == nil
+        and bordered.hideWindowBorder == nil,
+        "obsolete refresh, animation and border flags survived migration")
 
       local borderless = {
         visualVersion = 4,
@@ -146,8 +147,26 @@ def run(ctx: Context):
         windows = {},
       }
       Skada.WindowConfig.Migrate(borderless)
-      assert(borderless.visualVersion == 6 and borderless.windowBorderStyle == "none",
+      assert(borderless.visualVersion == 8 and borderless.windowBorderStyle == "none",
         "border migration changed an existing borderless profile")
+
+      -- The profile's mirror of the first window's settings is dropped: each
+      -- window owns its settings, and the profile keeps no copy.
+      local mirrored = {
+        visualVersion = 7, width = 300, mode = "healing", segment = 2, x = 10,
+        windows = { { width = 300, mode = "healing", segment = 2, x = 10 } },
+      }
+      Skada.WindowConfig.Migrate(mirrored)
+      assert(mirrored.width == nil and mirrored.mode == nil and mirrored.segment == nil
+        and mirrored.x == nil, "the profile kept a copy of the first window's settings")
+      assert(mirrored.windows[1].width == 300 and mirrored.windows[1].mode == "healing",
+        "dropping the mirror touched the window's own settings")
+
+      -- A fresh profile starts at the current version: no conversions run.
+      local fresh = { windows = {} }
+      Skada.WindowConfig.Migrate(fresh)
+      assert(fresh.visualVersion == 8 and fresh.windowBorderStyle == nil,
+        "a fresh profile ran the upgrade conversions")
 
       -- Docked (bottom-left anchored) windows keep their pixel height across
       -- the trailing-spacing change; free-floating windows keep their rows.
@@ -166,29 +185,20 @@ def run(ctx: Context):
       assert(docked.windows[2].rows == 10, "a floating window's row count was migrated")
 
       local profile = Skada.db.profile
-      local primary = Skada.UI:GetPrimary()
-      local oldStyle, oldWindowVersion = profile.windowBorderStyle,
-        primary.db.visualVersion
-      profile.visualVersion = 6
+      local oldStyle = profile.windowBorderStyle
       profile.windowBorderStyle = "shadow"
-      primary.db.visualVersion = 4
-      Skada.WindowConfig.SyncLegacy(Skada.UI, primary)
-      assert(profile.visualVersion == 6,
-        "primary-window sync downgraded the profile migration version")
       Skada.WindowConfig.Migrate(profile)
       assert(profile.windowBorderStyle == "shadow",
         "reload migration overwrote an explicitly selected border style")
       profile.windowBorderStyle = oldStyle
-      primary.db.visualVersion = oldWindowVersion
     ''')
     ctx.run('''
       local profile = Skada.db.profile
       local Style = Skada.UIStyle
       local probe = CreateFrame("Frame", nil, UIParent)
-      local oldStyle, oldColor, oldHidden, oldClassChrome = profile.windowBorderStyle,
-        profile.windowBorderColor, profile.hideWindowBorder, profile.classColorMenus
+      local oldStyle, oldColor, oldClassChrome = profile.windowBorderStyle,
+        profile.windowBorderColor, profile.classColorMenus
 
-      profile.hideWindowBorder = false
       profile.classColorMenus = false
       profile.windowBorderColor = { 0.22, 0.44, 0.66 }
       profile.windowBorderStyle = "solid"
@@ -222,7 +232,7 @@ def run(ctx: Context):
         "borderless style left a backdrop edge or shadow visible")
 
       profile.windowBorderStyle, profile.windowBorderColor = oldStyle, oldColor
-      profile.hideWindowBorder, profile.classColorMenus = oldHidden, oldClassChrome
+      profile.classColorMenus = oldClassChrome
     ''')
     ctx.run('''
       local meter = Skada.UI:GetPrimary()
@@ -323,7 +333,7 @@ def run(ctx: Context):
       local resizeWindow = {
         frame = resizeFrame,
         db = { barHeight = 10, barSpacing = 1 },
-        manager = { SyncLegacy = function() end },
+        manager = { NotifyWindowChanged = function() end },
       }
       Skada.UISnapDock.PersistGeometry(resizeWindow, false)
       assert(resizeWindow.db.rows == 10, "unchanged window height gained a meter row")
@@ -343,7 +353,7 @@ def run(ctx: Context):
       local gridWindow = {
         frame = gridFrame,
         db = { barHeight = 18, barSpacing = 2, hideTitle = true },
-        manager = { SyncLegacy = function() end },
+        manager = { NotifyWindowChanged = function() end },
       }
       Skada.UISnapDock.PersistGeometry(gridWindow, false)
       local expectedHeight = Style.HEADLESS_TOP_INSET
@@ -402,6 +412,46 @@ def run(ctx: Context):
       meter:Animate()
       assert(meter.title.textValue == titleBefore, "a broken window kept refreshing")
       meter.broken = nil
+      meter:Refresh()
+    ''')
+    ctx.run('''
+      -- The minimap show/hide-all toggle ignores a broken window's stale
+      -- `visible` flag: counting it would make every click a "hide" and the
+      -- working windows could never be shown again.
+      local meter = Skada.UI:GetPrimary()
+      local savedVisible = meter.db.visible
+      local brokenWindow = { broken = true, db = { visible = true } }
+      table.insert(Skada.UI.windows, brokenWindow)
+      meter.db.visible = true
+      assert(Skada.UI:ToggleAllWindows() == false, "toggle with a shown window must hide")
+      assert(meter.db.visible == false, "the working window was not hidden")
+      assert(Skada.UI:ToggleAllWindows() == true,
+        "a broken window's stale visible flag blocked show-all")
+      assert(meter.db.visible == true, "the working window was not shown again")
+      assert(brokenWindow.db.visible == true, "a broken window's flag must be left alone")
+      table.remove(Skada.UI.windows)
+
+      -- Show-all brings back only what hide-all hid: a window the player
+      -- hid on purpose stays hidden.
+      local hiddenOnPurpose = { db = { visible = true } }
+      table.insert(Skada.UI.windows, hiddenOnPurpose)
+      Skada.UI:SetWindowVisible(hiddenOnPurpose, false)
+      assert(Skada.UI:ToggleAllWindows() == false)
+      assert(meter.db.visible == false and meter.db.hiddenByToggle == true)
+      assert(hiddenOnPurpose.db.hiddenByToggle == nil, "an already-hidden window was marked")
+      assert(Skada.UI:ToggleAllWindows() == true)
+      assert(meter.db.visible == true and meter.db.hiddenByToggle == nil,
+        "show-all did not bring back the window it hid")
+      assert(hiddenOnPurpose.db.visible == false, "show-all revealed a window hidden on purpose")
+      -- With nothing marked (every window hidden one by one), show-all shows all.
+      Skada.UI:SetWindowVisible(meter, false)
+      assert(Skada.UI:ToggleAllWindows() == true)
+      assert(meter.db.visible == true and hiddenOnPurpose.db.visible == true,
+        "show-all with nothing marked must show every window")
+      table.remove(Skada.UI.windows)
+      meter.db.visible = savedVisible
+      if savedVisible then meter.frame:Show() else meter.frame:Hide() end
+      meter.layoutDirty = true
       meter:Refresh()
     ''')
     ctx.run('''
