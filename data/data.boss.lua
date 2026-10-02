@@ -114,6 +114,9 @@ end
 function BossDetection:InspectUnit(unitToken, encounterNameByTrigger)
   if not UnitExists or not UnitExists(unitToken) then return end
   if UnitIsPlayer and UnitIsPlayer(unitToken) then return end
+  -- A hunter pet can be renamed "Onyxia"; player-controlled units never
+  -- stand for an encounter, whatever their name.
+  if UnitPlayerControlled and UnitPlayerControlled(unitToken) then return end
   if UnitAffectingCombat and not UnitAffectingCombat(unitToken) then return end
 
   local unitName = UnitName(unitToken)

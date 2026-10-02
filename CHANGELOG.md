@@ -2,6 +2,46 @@
 
 All notable changes to the PMP Skada rewrite are documented here.
 
+## 3.0.1 - 2026-10-02
+
+### Fixed
+
+- Live threat no longer accepts a threat table sent by another player. Any
+  group member could post a forged Threat API v1 reply as an addon message
+  and have it shown as live server data. Packets from a roster member other
+  than you, guild- and battleground-channel packets, and packets with escape
+  sequences in names, non-finite values or oversized tables are dropped, and
+  the first one dropped is reported in chat.
+- On servers that never answer threat queries, Skada no longer sends one to
+  the group every half second for the whole session: after eight unanswered
+  queries it re-asks every 15 seconds (and once per target switch) until a
+  reply arrives or the group changes.
+- A hunter pet renamed after a group member no longer takes that member's
+  damage, healing, threat and deaths. Players claim their names before pets
+  are read, and a pet whose name is taken gets its own "Name (Owner)" entry,
+  so with Nampower its numbers go to its real owner. Two hunters' pets with
+  the same name no longer both land on the last owner either.
+- A unit outside the group wearing a member's name (a stranger's pet, a mob
+  named like a group pet) no longer overwrites that member's identity when
+  it is targeted, moused over or nameplated, and is no longer used to price
+  the member's overhealing. With Nampower its events are filed under
+  "Name (other)" and credit nobody. Without Nampower, chat text carries no
+  GUIDs, so a shared name is still credited to the group member.
+- Boss detection ignores player-controlled units, so a pet renamed after a
+  boss no longer marks a trash fight as that encounter.
+- Chat reports strip `|` escape characters and cap each line at 255 bytes.
+
+### Changed
+
+- Threat tooltips name the source of server threat data as "Server" instead
+  of a specific server name, and the threat initializer is listed as
+  "live threat", matching the others.
+- The README and docs describe Skada as a WoW Vanilla 1.12.1 (ClassicAPI)
+  meter rather than a single-server one, name the threat protocol Skada
+  speaks (Threat API v1) instead of a generic "server", and carry a new hero
+  image and refreshed window and settings screenshots, palette-compressed to
+  keep the repository small.
+
 ## 3.0.0 - 2026-10-01
 
 ### Fixed

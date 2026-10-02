@@ -1,12 +1,12 @@
 # Architecture
 
 This document describes the runtime boundaries and extension contracts for the
-OctoWoW Vanilla build of Skada. User-facing installation and controls belong in
+WoW Vanilla 1.12.1 build of Skada. User-facing installation and controls belong in
 [README.md](README.md).
 
 ## Runtime constraints
 
-- The target client uses the Vanilla 1.12.1 interface and ClassicAPI.
+- The target client uses the WoW Vanilla 1.12.1 interface and ClassicAPI.
 - `Skada.toc` is the authoritative load order.
 - Runtime code avoids Ace, LibStub, and display-framework dependencies.
 - Combat data is stored as bounded aggregates, not an event timeline.
@@ -40,7 +40,7 @@ ownership clear in search results while preserving explicit TOC ordering.
 | --- | --- | --- |
 | Foundation | `core/core.compat.lua`, `core/core.common.lua`, `core/core.defaults.lua`, `core/core.runtime.lua`, `ui/ui.style.lua` | Client-gap shims and stdlib repairs, compatibility helpers, profile defaults, lifecycle, events, tickers, internal messages, rendering policy, and shared visuals |
 | Identity and data | `data/data.identity.lua`, `data/data.aggregator.lua`, `data/data.boss.lua`, `data/data.segments.lua`, `data/data.navigation.lua`, `data/data.lua`, `data/data.reset.lua` | Roster and pet ownership, aggregate mutation, boss recognition, segment lifecycle, history navigation, the data facade, and reset policies |
-| Threat | `threat/threat.estimate.lua`, `threat/threat.lua` | Combat-scoped local estimates and the authoritative OctoWoW Threat API v4 provider |
+| Threat | `threat/threat.estimate.lua`, `threat/threat.lua` | Combat-scoped local estimates and the authoritative server threat provider (Threat API v1; wire strings `TWT_UDTSv4` query and `TWTv4=` reply, kept verbatim as `THREAT_APIV1_QUERY`/`THREAT_APIV1_REPLY`) |
 | Enrichment | `tracking/tracking.spells.lua`, `tracking/tracking.casts.lua`, `tracking/tracking.auras.lua`, `tracking/tracking.damage.lua`, `tracking/tracking.group.lua`, `tracking/tracking.lua` | Spell metadata, cast correlation, dispels, interrupts, aura uptime, last-hit evidence, and group observation |
 | Parsing and projection | `combat/combat.parser.lua`, `combat/combat.nampower.lua`, `modes/modes.lua` | Combat-text routing, Nampower server-event ingest, and projection of aggregates into meter modes |
 | Window UI | `ui/ui.config.lua`, `ui/ui.presenter.lua`, `ui/ui.rows.lua`, `ui/ui.snap.lua`, `ui/ui.report.lua`, `ui/ui.lua` | Per-window persistence, display models, pooled row rendering, snapping, reporting, and window composition |
@@ -74,9 +74,24 @@ explicit.
 5. `ui/ui.presenter.lua` builds reusable display entries; `ui/ui.rows.lua`
    paints pooled rows and performs easing separately from rebuilds.
 
+Identities are keyed by name, and names are not unique (hunters rename pets
+freely). `data/data.identity.lua` therefore gates every name collision on the
+unit itself: players claim their names before any pet is read, a group pet
+whose name is taken becomes `Name (Owner)` with its GUID pointing there, and
+a unit seen on `target`, `mouseover` or a nameplate never overwrites a
+tracked identity unless the client says it is the same unit (`UnitIsUnit`
+against the identity's group token). The Nampower ingest applies the same
+gate to GUIDs the roster does not know, filing them as `Name (other)`. Chat
+text has no GUIDs, so there a shared name still resolves to the group unit.
+
 Threat follows a separate path. Accepted damage and healing facts are published
 to `threat/threat.estimate.lua`, while `threat/threat.lua` requests and parses
 live server snapshots. Neither provider writes threat into combat segments.
+Replies arrive as `CHAT_MSG_ADDON`, which any group member can also send, so
+the provider drops packets whose sender is a roster member other than the
+player, guild-channel packets, and packets with malformed names or
+non-finite values. Until the current group hears one reply, eight unanswered
+queries in a row slow querying to one every 15 seconds.
 
 ## Core contracts
 

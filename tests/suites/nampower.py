@@ -431,3 +431,82 @@ def run(ctx: Context):
       TestSetCombat(false)
       Skada.Data:Reset()
     ''')
+
+    # GUID gate: names are not unique, so a unit wearing a tracked name must
+    # never take over that identity or be credited as it.
+    ctx.run(r'''
+      local Nampower = Skada.Nampower
+      local frame = Nampower.frame
+      local function fire(eventName, a, b, c, d, e, f, g, h, i)
+        frame:GetScript("OnEvent")(frame, eventName, a, b, c, d, e, f, g, h, i)
+      end
+      local savedMergePets = Skada.db.profile.mergePets
+      Skada.db.profile.mergePets = true
+      Skada.db.profile.useNampower = true
+      Nampower:ApplySetting()
+      TestSetPartyMembers(1)
+
+      -- Bob renames his pet after the player. The roster lists Bob's pet
+      -- either way round; the player keeps the name and the pet yields.
+      TestSetUnit("partypet1", { name = "Alice", class = "WARRIOR", guid = "0xBP",
+        friend = true, health = 1000, maxHealth = 1000 })
+      Skada.Data:RebuildRoster()
+      local aliceIdentity = Skada.Data:GetIdentityByName("Alice")
+      assert(aliceIdentity.owner == nil and aliceIdentity.unit == "player",
+        "a pet renamed after the player took over the player's identity")
+      assert(Skada.Data:GetIdentityByGUID("0xA") == aliceIdentity)
+      local renamedPet = Skada.Data:GetIdentityByGUID("0xBP")
+      assert(renamedPet and renamedPet.name == "Alice (Bob)" and renamedPet.owner == "Bob",
+        "the renamed pet did not get its own owner-keyed identity")
+
+      Skada.Data:Reset()
+      TestSetCombat(true)
+      Skada.Data:OnCombatEnter(GetTime())
+      local current = Skada.Data.current
+      fire("SPELL_DAMAGE_EVENT_OTHER", "0xC", "0xBP", 133, 300, "0,0,0", 0, 2, "2,0,0,0")
+      assert(current.actors.Bob and current.actors.Bob.damage == 300,
+        "the renamed pet's damage was not credited to its owner")
+      assert(not current.actors.Alice or (current.actors.Alice.damage or 0) == 0,
+        "the renamed pet's damage was credited to the player it was named after")
+
+      -- A stranger's pet named after a group member: not on any group
+      -- token, so it is filed as "Bob (other)" and credits nobody.
+      TestRegisterGUIDUnit("0xS1", "Bob", "WARRIOR", true)
+      fire("SPELL_DAMAGE_EVENT_OTHER", "0xC", "0xS1", 133, 500, "0,0,0", 0, 2, "2,0,0,0")
+      assert(current.actors.Bob.damage == 300,
+        "a stranger wearing a member's name was credited to that member")
+      assert(Nampower:ResolveName("0xS1") == "Bob (other)")
+
+      -- Targeting that stranger must not repoint Bob's identity at it.
+      TestSetTarget("Bob", "0xS1")
+      Skada.Data:ObserveToken("target")
+      local bobIdentity = Skada.Data:GetIdentityByName("Bob")
+      assert(bobIdentity.guid == "0xB" and bobIdentity.unit == "party1",
+        "observing a stranger on the target token poisoned a member's identity")
+      assert(Skada.Data:GetIdentityByGUID("0xS1") == nil)
+      assert(Skada.Data:FindUnitByName("Bob") == "party1",
+        "a stranger's health would have priced a member's heals")
+
+      -- Targeting the member themselves still refreshes them as before.
+      TestSetTarget("Boar", "0xC")
+      assert(Skada.Data:ObserveToken("party1") == bobIdentity)
+      assert(bobIdentity.unit == "party1")
+
+      -- Two pets with one name: the second owner's gets "Wolf (Bob)".
+      TestSetUnit("partypet1", { name = "Wolf", class = "WARRIOR", guid = "0xBW",
+        friend = true, health = 1000, maxHealth = 1000 })
+      Skada.Data:RebuildRoster()
+      assert(Skada.Data:GetIdentityByName("Wolf").owner == "Alice")
+      assert(Skada.Data:GetIdentityByGUID("0xBW").name == "Wolf (Bob)")
+
+      TestSetUnit("partypet1", nil)
+      TestUnregisterGUIDUnit("0xBP")
+      TestUnregisterGUIDUnit("0xBW")
+      TestUnregisterGUIDUnit("0xS1")
+      Skada.Data:RebuildRoster()
+      Skada.db.profile.mergePets = savedMergePets
+      Skada.db.profile.useNampower = false
+      Nampower:ApplySetting()
+      TestSetCombat(false)
+      Skada.Data:Reset()
+    ''')

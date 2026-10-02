@@ -60,7 +60,7 @@ end })
 
 registerSlashCommand({ name = "help", handler = printHelp })
 
--- TEMPORARY diagnostic for the settings dialog's dead sidebar on the OctoWoW
+-- TEMPORARY diagnostic for the settings dialog's dead sidebar on the 1.12.1
 -- client: dumps how the engine sees each layer of the dialog plus what is
 -- under the cursor. Run it with the mouse over a sidebar row. Remove once the
 -- hit-testing gap is understood and fixed.

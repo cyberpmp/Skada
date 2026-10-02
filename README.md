@@ -1,7 +1,11 @@
-# Skada for OctoWoW
+# Skada
 
-A lightweight, framework-free combat meter built specifically for the
-OctoWoW Vanilla 1.12.1 client. Skada combines detailed combat analysis with
+<p align="center">
+  <img src="docs/images/skada-hero.png" alt="Skada: live Damage and Healing meters during a 40-player raid">
+</p>
+
+A lightweight, framework-free combat meter built for the WoW Vanilla 1.12.1
+client. Skada combines detailed combat analysis with
 independent meter windows, fast drill-down navigation, and native in-game
 configuration.
 
@@ -19,11 +23,9 @@ minimal presentation.
 
 <p align="center">
   <a href="docs/images/skada-windows.png">
-    <img src="docs/images/skada-windows.png" alt="Skada windows arranged as a compact combat dashboard">
+    <img src="docs/images/skada-windows.png" alt="Skada Damage, Healing and Dispels windows snapped together during a raid">
   </a>
 </p>
-
-<p align="center"><sub>Independent Damage, Healing, and Dispels views arranged in a snapped layout.</sub></p>
 
 ### Configure each window in-game
 
@@ -34,11 +36,9 @@ immediately, without an external configuration framework.
 
 <p align="center">
   <a href="docs/images/skada-settings.png">
-    <img src="docs/images/skada-settings.png" alt="Skada native settings panel showing per-window design controls">
+    <img src="docs/images/skada-settings.png" alt="Skada native settings panel on the General page">
   </a>
 </p>
-
-<p align="center"><sub>Per-window controls are organized in a clear, scrollable settings panel.</sub></p>
 
 ## Features
 
@@ -56,7 +56,9 @@ immediately, without an external configuration framework.
 
 ### Threat
 
-- Live, target-specific Threat API v4 data from the OctoWoW server.
+- Live, target-specific threat tables on servers that support
+  the Threat API v1 protocol. Replies relayed by other players are ignored, and on servers that never
+  answer, queries slow to one every 15 seconds.
 - Threat rank, aggro percentage, tank status, range state, and derived TPS.
 - Threat rows follow the damage layout: threat `(TPS, aggro percentage)`.
 - A clearly marked local estimate when a server reply is unavailable.
@@ -204,7 +206,7 @@ enriched with ClassicAPI unit, GUID, cast, aura, and creature information.
 - A boss fight is recognized from the server-authored boss creature rank or an
   engaged BigWigs encounter module. Player and group-member targets are scanned;
   players, pets, and elite trash do not qualify solely by level or appearance.
-- The OctoWoW Threat API remains authoritative. The local fallback estimates
+- Server threat data (Threat API v1), when available, remains authoritative. The local fallback estimates
   damage and distributed healing threat and may use optional Nampower DBC
   fields, but it is not a substitute for the server table.
 - Several avoidance and resource-gain messages use verified English patterns
@@ -249,7 +251,7 @@ When reporting a bug, include:
 
 - The Skada version (`/skada status` prints it) and where it came from (release
   zip or git checkout).
-- Your client and load order: which OctoWoW build you run, and whether
+- Your client and load order: which client build you run, and whether
   `!!!ClassicAPI`, BigWigs, and Nampower are enabled.
 - The output of `/skada status`.
 - What you expected, what happened instead, and the steps to reproduce it.
@@ -267,7 +269,7 @@ test suite before submitting (`python tests/run_tests.py`) and include it in the
 PR; new behavior should come with coverage in `tests/suites/`. Keep new modules
 consistent with the structure described in [ARCHITECTURE.md](ARCHITECTURE.md),
 and note in the description which client features the change depends on, since
-compatibility targets the OctoWoW 1.12.1 API specifically.
+compatibility targets the 1.12.1 API with ClassicAPI specifically.
 
 ## Releasing
 

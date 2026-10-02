@@ -21,7 +21,7 @@ def toc_load_list():
         if not line or line.startswith("#"):
             continue
         assert line.endswith(".lua"), f"unexpected toc entry: {line!r}"
-        # The game TOC uses backslash separators (the OctoWoW loader requires
+        # The game TOC uses backslash separators (the client's loader requires
         # them); normalize to forward slashes so the harness also runs on CI.
         entries.append(line.replace("\\", "/"))
     assert entries, "Skada.toc contained no loadable files"
@@ -63,8 +63,9 @@ def lint_script_hooks():
 def load_addon():
     """Load the addon in a stubbed environment.
 
-    Chunks are invoked with no arguments, matching the OctoWoW client: addon
-    chunks receive no varargs and share the global environment (the addon's
+    Chunks are invoked with no arguments, matching the WoW Vanilla
+    1.12.1 client as run with ClassicAPI, where addon chunks receive no varargs and no _G
+    and share the global environment (the addon's
     own _G-or-getfenv(0) bootstrap in core/core.common.lua relies on this).
     """
     lua = LuaRuntime(unpack_returned_tuples=True)

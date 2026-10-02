@@ -1,9 +1,9 @@
 ## Interface: 11200
 ## Title: |cffff8000Skada|r
-## Notes: Lightweight combat meter for Vanilla 1.12.1 and ClassicAPI.
+## Notes: Lightweight combat meter for WoW Vanilla 1.12.1 and ClassicAPI.
 ## Author: PMP (cyberpmp)
-## Version: 3.0.0
-## X-Build: 2026-10-01.1
+## Version: 3.0.1
+## X-Build: 2026-10-02.2
 ## OptionalDeps: !!!ClassicAPI, BigWigs
 ## SavedVariables: SkadaDB
 ## LoadSavedVariablesFirst: 1

@@ -1,8 +1,14 @@
 local Skada = (_G or getfenv(0)).Skada
 
+-- Threat API v1: the server-side threat protocol. These two strings are the
+-- wire format the server matches byte for byte, so they keep their original
+-- spelling; everything else refers to them by these names.
+local THREAT_APIV1_QUERY = "TWT_UDTSv4"
+local THREAT_APIV1_REPLY = "TWTv4="
+
 local Threat = {
-  requestPrefix = "TWT_UDTSv4",
-  responseMarker = "TWTv4=",
+  requestPrefix = THREAT_APIV1_QUERY,
+  responseMarker = THREAT_APIV1_REPLY,
 
   queryInterval = 0.5,
   burstInterval = 0.10,
@@ -12,6 +18,16 @@ local Threat = {
   estimateGrace = 2.0,
   serverHold = 0.75,
   requestLimit = 10,
+  -- A server without the threat API never answers. Until the current group
+  -- has heard one reply, this many unanswered queries in a row drop the
+  -- provider to one re-probe per backoffInterval (and one per target switch)
+  -- instead of flooding the group channel for the whole session.
+  unansweredLimit = 8,
+  backoffInterval = 15,
+  -- A packet with more records than any real table (requestLimit rows plus
+  -- a tank line) is rejected as forged.
+  maxPacketRecords = 40,
+  maxNameLength = 48,
 
   windowEnumerator = nil,
 }
@@ -117,6 +133,7 @@ function Threat:GroupChanged()
   -- none at all: the wait-for-server-reply hold must be relearned, not kept
   -- for the rest of the session on the strength of the old group's packets.
   self.receivedPackets = 0
+  self.unansweredQueries = 0
   local estimator = Skada.ThreatEstimate
   if estimator then
     estimator:PruneActors(function(actorName)
@@ -248,12 +265,58 @@ function Threat:Update(now)
 
   if not SendAddonMessage or not self:IsGrouped() or now < (self.nextQuery or 0) then return end
   local interval = (self.burstUntil and now < self.burstUntil) and self.burstInterval or self.queryInterval
+  if (self.receivedPackets or 0) == 0 and (self.unansweredQueries or 0) >= self.unansweredLimit then
+    interval = self.backoffInterval
+  end
   self.nextQuery = now + interval
   self.requestTarget = targetKey
+  self.unansweredQueries = (self.unansweredQueries or 0) + 1
   pcall(SendAddonMessage, self.requestPrefix, "limit=" .. self:GetQueryLimit(), self:GetChannel())
 end
 
-function Threat:OnAddonMessage(eventName, prefix, message)
+-- Addon messages from players carry the sender's name, set by the server,
+-- so a group member cannot pose as the threat server: a reply "from" anyone
+-- in the roster other than the player is a relay or a forgery. Only roster
+-- members can post to PARTY and RAID, so checking the roster tokens covers
+-- every player sender there. The roster is read off the tokens, not the
+-- identity table, where a pet named after a member can mask that member.
+-- The guild and battleground channels reach players outside the group and
+-- never carry a reply to a party or raid query.
+function Threat:IsTrustedSender(channel, sender)
+  if channel == "GUILD" or channel == "BATTLEGROUND" then return false end
+  if type(sender) ~= "string" or sender == "" then return true end
+  if UnitName and sender == UnitName("player") then return true end
+  local raidCount = GetNumRaidMembers and GetNumRaidMembers() or 0
+  local memberCount = raidCount > 0 and raidCount or (GetNumPartyMembers and GetNumPartyMembers() or 0)
+  local tokenPrefix = raidCount > 0 and "raid" or "party"
+  local memberIndex
+  for memberIndex = 1, memberCount do
+    if UnitName(tokenPrefix .. memberIndex) == sender then return false end
+  end
+  return true
+end
+
+-- Row names are drawn on bars and may be reported to chat: anything that is
+-- not a plausible unit name (an escape sequence, a control character, an
+-- overlong string) marks the whole packet as forged.
+function Threat:IsValidRowName(name)
+  if string.len(name) > self.maxNameLength then return false end
+  return not string_find(name, "[\1-\31|]")
+end
+
+local function isFiniteNumber(value)
+  return value ~= nil and value - value == 0
+end
+
+function Threat:RejectPacket(channel, sender, reason)
+  self.rejectedPackets = (self.rejectedPackets or 0) + 1
+  if self.rejectionReported then return end
+  self.rejectionReported = true
+  Skada:Print("Ignored a threat packet (" .. reason .. ") from " ..
+    tostring(sender) .. " on " .. tostring(channel) .. ". Further ones are dropped silently.")
+end
+
+function Threat:OnAddonMessage(eventName, prefix, message, channel, sender)
 
   local payload = message
   local markerAt = type(payload) == "string" and string_find(payload, self.responseMarker, 1, true)
@@ -262,6 +325,10 @@ function Threat:OnAddonMessage(eventName, prefix, message)
     markerAt = string_find(payload, self.responseMarker, 1, true)
   end
   if not markerAt then return end
+  if not self:IsTrustedSender(channel, sender) then
+    self:RejectPacket(channel, sender, "sent by a player")
+    return
+  end
 
   local targetName = self:GetTargetName(true)
   local targetKey = self:GetTargetKey(targetName)
@@ -271,14 +338,34 @@ function Threat:OnAddonMessage(eventName, prefix, message)
   local tankPacketAt = string_find(payload, "#", 1, true)
   if tankPacketAt then payload = string_sub(payload, 1, tankPacketAt - 1) end
 
+  -- Validate the whole packet before touching any row, so a malformed one
+  -- leaves the previous table in place instead of half-applying.
+  local record, name, row, tankFlag, threatValue, percentValue, meleeFlag
+  local recordCount = 0
+  for record in string_gmatch(payload, "([^;]+)") do
+    recordCount = recordCount + 1
+    if recordCount > self.maxPacketRecords then
+      self:RejectPacket(channel, sender, "too many rows")
+      return
+    end
+    name, tankFlag, threatValue, percentValue = string_match(record, "^([^:]+):([^:]*):([^:]*):([^:]*)")
+    if name and not self:IsValidRowName(name) then
+      self:RejectPacket(channel, sender, "malformed name")
+      return
+    end
+    threatValue, percentValue = tonumber(threatValue), tonumber(percentValue)
+    if (threatValue and not isFiniteNumber(threatValue)) or (percentValue and not isFiniteNumber(percentValue)) then
+      self:RejectPacket(channel, sender, "malformed value")
+      return
+    end
+  end
+
   local now = GetTime()
   local ungrouped = not self:IsGrouped()
 
-  local name, row
   for name, row in pairs(self.rowsByName) do row.seen = false end
   wipeTable(self.rows)
 
-  local record, tankFlag, threatValue, percentValue, meleeFlag
   local identity
   for record in string_gmatch(payload, "([^;]+)") do
     name, tankFlag, threatValue, percentValue, meleeFlag =
@@ -337,6 +424,7 @@ function Threat:OnAddonMessage(eventName, prefix, message)
   self.usingEstimate = false
   self.burstUntil = nil
   self.receivedPackets = (self.receivedPackets or 0) + 1
+  self.unansweredQueries = 0
   Skada:MarkDirty()
 end
 
@@ -360,11 +448,13 @@ function Threat:Initialize()
   self:ResetTargetState(GetTime and GetTime() or 0)
   self.burstUntil = nil
   self.receivedPackets = 0
+  self.unansweredQueries = 0
+  self.rejectedPackets = 0
   self.estimateRows = {}
 end
 
-Skada:RegisterEvent("CHAT_MSG_ADDON", function(eventName, prefix, message)
-  Threat:OnAddonMessage(eventName, prefix, message)
+Skada:RegisterEvent("CHAT_MSG_ADDON", function(eventName, prefix, message, channel, sender)
+  Threat:OnAddonMessage(eventName, prefix, message, channel, sender)
 end)
 Skada:RegisterEvent("PLAYER_TARGET_CHANGED", function() Threat:TargetChanged() end)
 Skada:RegisterEvent("PLAYER_REGEN_DISABLED", function()
@@ -378,6 +468,6 @@ end)
 Skada:RegisterEvent("PARTY_MEMBERS_CHANGED", function() Threat:GroupChanged() end)
 Skada:RegisterEvent("RAID_ROSTER_UPDATE", function() Threat:GroupChanged() end)
 
-Skada:RegisterInitializer(function() Threat:Initialize() end, "OctoWoW live threat")
+Skada:RegisterInitializer(function() Threat:Initialize() end, "live threat")
 
 Skada:RegisterTicker("threat", 0.20, function(now) Threat:Update(now) end)

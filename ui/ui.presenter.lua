@@ -271,7 +271,7 @@ function Presenter:ShowEntryTooltip(row)
     GameTooltip:AddDoubleLine(threatLabel, tostring(threatRow.threat or 0), 0.8, 0.8, 0.8, 1, 1, 1)
     GameTooltip:AddDoubleLine("Aggro", tostring(floor((threatRow.percent or 0) + 0.5)) .. "%", 0.8, 0.8, 0.8, 1, 1, 1)
     GameTooltip:AddDoubleLine("TPS", Skada:FormatNumber(threatRow.tps or 0), 0.8, 0.8, 0.8, 1, 1, 1)
-    GameTooltip:AddDoubleLine("Source", threatRow.estimated and "Local estimate" or "OctoWoW server", 0.8, 0.8, 0.8, 1, 1, 1)
+    GameTooltip:AddDoubleLine("Source", threatRow.estimated and "Local estimate" or "Server", 0.8, 0.8, 0.8, 1, 1, 1)
     GameTooltip:AddDoubleLine("Status", threatRow.tank and "Tanking" or "Not tanking", 0.8, 0.8, 0.8, 1, 1, 1)
     GameTooltip:AddDoubleLine("Range", threatRow.melee and "Melee" or "Ranged", 0.8, 0.8, 0.8, 1, 1, 1)
   elseif entry.spell then

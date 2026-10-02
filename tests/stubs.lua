@@ -52,7 +52,7 @@ function TestSetTarget(name, guid)
   units.target.name, units.target.guid = name, guid
 end
 
--- The OctoWoW client resolves a raw GUID string wherever a unit token is
+-- With SuperWoW, the client resolves a raw GUID string wherever a unit token is
 -- accepted (the SuperWoW extension Skada's Nampower ingest depends on), so the
 -- stub answers GUID lookups the same way the client does. Units that never sit
 -- on a token still resolve once registered here.
@@ -96,7 +96,18 @@ function GetUnitField(unit, fieldName)
   return summonerByGUID[value.guid] or "0x0000000000000000"
 end
 
+-- Puts a unit on a token (or clears the token with nil), for roster and
+-- name-collision tests that need pets or strangers the default table lacks.
+function TestSetUnit(token, value)
+  units[token] = value
+  if value and value.guid then unitsByGUID[value.guid] = value end
+end
+
 function UnitExists(unit) return resolveUnit(unit) ~= nil end
+function UnitIsUnit(left, right)
+  local leftValue = resolveUnit(left)
+  return leftValue ~= nil and leftValue == resolveUnit(right)
+end
 function UnitName(unit)
   local value = resolveUnit(unit)
   return value and value.name
@@ -248,7 +259,7 @@ function objectMethods:SetPoint(point, relativeTo, relativePoint, x, y)
   self.lastPoint, self.lastRelativeTo, self.lastRelativePoint = point, relativeTo, relativePoint
   self.lastPointX, self.lastPointY = x, y
 end
--- Parenting and layering, modelled on the OctoWoW client as observed in
+-- Parenting and layering, modelled on the ClassicAPI 1.12.1 client as observed in
 -- game (see core/core.compat.lua's SetParent shim): a frame takes its
 -- parent's strata and parent level + 1 when CREATED, and SetParent moves it
 -- without re-deriving either -- so an AceGUI widget built under UIParent and

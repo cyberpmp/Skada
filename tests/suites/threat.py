@@ -386,6 +386,57 @@ def run(ctx: Context):
       assert(not Skada.Threat.usingEstimate)
       assert(Skada.Threat.rowsByName.Alice.threat == 5000)
       assert(not Skada.Threat.rowsByName.Alice.estimated)
+
+      -- A groupmate cannot pose as the threat server: the client stamps
+      -- the real sender on player addon messages. Neither can a guildmate
+      -- outside the group, nor a packet carrying escapes or impossible values.
+      local function sendForged(message, channel, sender)
+        Skada.Threat.requestTarget = "0xE"
+        Skada.Threat:OnAddonMessage("CHAT_MSG_ADDON", "TWT", message, channel, sender)
+      end
+      Skada.Threat.rejectionReported = nil
+      local rejectedBefore = Skada.Threat.rejectedPackets or 0
+      sendForged("TWTv4=Bob:1:99999:100:1", "PARTY", "Bob")
+      assert(not Skada.Threat.rowsByName.Bob and Skada.Threat.rowsByName.Alice.threat == 5000,
+        "a groupmate's forged threat packet was accepted")
+      -- A pet named after the forger must not hide them from the roster check.
+      local forgerIdentity = Skada.Data:GetIdentityByName("Bob")
+      local savedOwner = forgerIdentity.owner
+      forgerIdentity.owner = "Bob"
+      sendForged("TWTv4=Bob:1:99999:100:1", "RAID", "Bob")
+      forgerIdentity.owner = savedOwner
+      sendForged("TWTv4=Bob:1:99999:100:1", "GUILD", "Mallory")
+      sendForged("TWTv4=Bob:1:99999:100:1", "BATTLEGROUND", "Mallory")
+      sendForged("TWTv4=|Hitem:1|h[x]|h:1:99999:100:1", "PARTY", "")
+      sendForged("TWTv4=Bob:1:1e999:100:1", "PARTY", "")
+      sendForged("TWTv4=" .. string.rep("Bob:0:1:1:0;", 41), "PARTY", "")
+      assert(not Skada.Threat.rowsByName.Bob and Skada.Threat.rowsByName.Alice.threat == 5000,
+        "a forged threat packet replaced the live table")
+      assert(Skada.Threat.rejectedPackets == rejectedBefore + 7)
+      -- The player's own name (and a blank sender) is how a server reply arrives.
+      sendForged("TWTv4=Alice:1:6000:100:1", "PARTY", "Alice")
+      assert(Skada.Threat.rowsByName.Alice.threat == 6000, "a reply addressed from the player was dropped")
+
+      -- No reply ever: after the unanswered limit, queries slow to the
+      -- backoff interval until a reply arrives or the group changes.
+      Skada.Threat.receivedPackets = 0
+      Skada.Threat.unansweredQueries = Skada.Threat.unansweredLimit
+      local savedCombatCheck = UnitAffectingCombat
+      UnitAffectingCombat = function(unit) return unit == "player" end
+      Skada.Threat.nextQuery = 0
+      Skada.Threat:Update(GetTime())
+      assert(Skada.Threat.nextQuery == GetTime() + Skada.Threat.backoffInterval,
+        "an unanswered threat provider kept querying at full rate")
+      Skada.Threat.receivedPackets = 1
+      Skada.Threat.nextQuery = 0
+      Skada.Threat:Update(GetTime())
+      assert(Skada.Threat.nextQuery < GetTime() + Skada.Threat.backoffInterval,
+        "a group that has heard the server was put on backoff")
+      UnitAffectingCombat = savedCombatCheck
+      Skada.Threat:GroupChanged()
+      assert(Skada.Threat.unansweredQueries < Skada.Threat.unansweredLimit,
+        "a new group inherited the old group's threat backoff")
+
       TestSetTime(100)
       TestSetTarget("Boar", "0xD")
 

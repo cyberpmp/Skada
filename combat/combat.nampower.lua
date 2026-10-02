@@ -118,6 +118,10 @@ local POWER_NAMES = {
 local nameByGUID = {}
 local nameCacheSize = 0
 local NAME_CACHE_LIMIT = 2000
+-- Appended to the name of a unit that wears a tracked unit's name without
+-- being it. Lower case, so it can never be a character name that
+-- ResolveSource's "Name (Owner)" match would find.
+local OUTSIDER_SUFFIX = " (other)"
 
 local function rememberName(guid, name)
   if nameByGUID[guid] then
@@ -230,6 +234,19 @@ function Nampower:ResolveName(guid)
   local name = UnitName(guid)
   if type(name) == "string" and name ~= "" and name ~= "Unknown" then
     adoptSummon(guid, name)
+    identity = Skada.Data:GetIdentityByGUID(guid)
+    if identity and identity.name then return rememberName(guid, identity.name) end
+    -- GUID gate: a unit the roster does not know that wears a tracked
+    -- name (a stranger's pet renamed after a raid member, a mob sharing a
+    -- group pet's name) is filed under "Name (other)". That key never
+    -- resolves to the tracked identity, so its hits, heals and death stay
+    -- off the group member's rows.
+    -- Only group units are gated: they sit on a token the client can
+    -- compare. Summons keep the name-based match they always had.
+    local holder = Skada.Data:GetIdentityByName(name)
+    if holder and holder.unit and Skada.Data:IsImpostor(guid, guid, holder) then
+      name = name .. OUTSIDER_SUFFIX
+    end
     return rememberName(guid, name)
   end
 

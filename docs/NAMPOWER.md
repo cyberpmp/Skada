@@ -129,7 +129,8 @@ ability-usage mode would come straight from these.
 `SPELL_GO_SELF` / `_OTHER`, republished by the ingest as the `spellGo` bus
 event (Nampower codes never fire on the shared frame). `GetSpellRec` and `GetSpellRecField` expose the client's DBC
 spell record (school, cast time, mana cost, effects, durations), which the
-estimator could use instead of its own tables. The OctoWoW Threat API stays
+estimator could use instead of its own tables. Server threat data (Threat API
+v1, where the server supports it) stays
 authoritative regardless.
 
 ### Unit state without token spam

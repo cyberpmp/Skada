@@ -8,6 +8,8 @@ local setReadableFont = Common.SetFont
 local Style = Skada.UIStyle
 
 local table_getn = table.getn
+local string_gsub = string.gsub
+local string_sub = string.sub
 local table_insert = table.insert
 local table_sort = table.sort
 
@@ -313,7 +315,12 @@ function Report:Report(window, channel, target)
   end
   local lines = self:BuildReportLines(window)
   local lineIndex
-  for lineIndex = 1, table_getn(lines) do SendChatMessage(lines[lineIndex], channel, nil, target) end
+  -- Report text never carries links or colours, so any '|' is a stray
+  -- escape (a malformed link can get the sender disconnected), and the
+  -- server drops chat lines past 255 bytes.
+  for lineIndex = 1, table_getn(lines) do
+    SendChatMessage(string_sub(string_gsub(lines[lineIndex], "|", ""), 1, 255), channel, nil, target)
+  end
   if self.reportPopup then self.reportPopup:Hide() end
 end
 
