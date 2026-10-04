@@ -62,21 +62,55 @@ end
 if not matchIsCorrect(strmatch) then strmatch = string.match end
 
 -- string.split ALREADY EXISTS on this client but is not drop-in compatible
--- with the Blizzard strsplit(delimiters, value) contract the chat command
--- dispatcher (SlashCmdList handlers, strsplit-based addon code) expects:
--- this client's native string.split was confirmed via in-game testing to
--- feed table.concat something other than clean strings ("table contains
--- non-strings") for some inputs. Unlike every other addition in this file,
--- this one is NOT guarded — it deliberately overrides the native, broken
--- implementation with a verified-correct one rather than deferring to it.
-local gmatch = string.gmatch or string.gfind
-function string.split(delimiters, value)
-  local pieces = {}
-  local piece
-  for piece in gmatch(value, "([^" .. delimiters .. "]+)") do
-    table.insert(pieces, piece)
+-- with the Blizzard strsplit(delimiters, value [, pieces]) contract the chat
+-- command dispatcher (SlashCmdList handlers, strsplit-based addon code)
+-- expects: this client's native string.split was confirmed via in-game
+-- testing to feed table.concat something other than clean strings ("table
+-- contains non-strings") for some inputs. Unlike every other addition in
+-- this file, this one is NOT guarded — it deliberately overrides the native,
+-- broken implementation with a verified-correct one rather than deferring
+-- to it. The earlier replacement dropped empty fields and collapsed runs of
+-- delimiters ("a::b" returned only "a" and "b") instead of the standard
+-- contract every real string.split follows; this version keeps empty
+-- fields, matches delimiter characters literally (no pattern metacharacter
+-- can sneak in with the delimiter list, and a non-string value is read as
+-- text instead of erroring), and honours the optional `pieces` cap by
+-- folding the remainder into the final field. Skada itself never calls it;
+-- it exists purely so that other addon code gets the contract it was
+-- written against.
+function string.split(delimiters, value, pieces)
+  local fields = {}
+  local fieldCount = 0
+  if value == nil then return unpack(fields) end
+  value = tostring(value)
+  delimiters = delimiters and tostring(delimiters) or ""
+  pieces = tonumber(pieces)
+  local length = string.len(value)
+  local fromIndex = 1
+  while true do
+    -- scan forward to the next delimiter; find(plaintext) instead of a
+    -- character class means "[", "-" and friends in the delimiter list
+    -- cannot corrupt the scan
+    local splitAt = length + 1
+    local index = fromIndex
+    while index <= length do
+      if string.find(delimiters, string.sub(value, index, index), 1, true) then break end
+      index = index + 1
+    end
+    splitAt = index
+    local lastField = pieces and fieldCount + 1 >= pieces and splitAt <= length
+    if lastField then
+      table.insert(fields, string.sub(value, fromIndex))
+    elseif splitAt > length then
+      table.insert(fields, string.sub(value, fromIndex))
+    else
+      table.insert(fields, string.sub(value, fromIndex, splitAt - 1))
+    end
+    fieldCount = fieldCount + 1
+    fromIndex = splitAt + 1
+    if splitAt > length or lastField then break end
   end
-  return unpack(pieces)
+  return unpack(fields)
 end
 strsplit = string.split
 

@@ -6,6 +6,7 @@ Skada.UIPresenter = Presenter
 local Common = Skada.Common
 local getVisibleRowCount = Skada.WindowConfig.GetVisibleRowCount
 local wipeTable = Common.Wipe
+local getTooltip = Common.GetTooltip
 
 local pairs = pairs
 local floor = math.floor
@@ -255,72 +256,73 @@ end
 function Presenter:ShowEntryTooltip(row)
   local entry = row.entry
   if not entry then return end
-  GameTooltip:SetOwner(row, "ANCHOR_LEFT")
-  GameTooltip:AddLine(entry.label, 1, 1, 1)
+  local tooltip = getTooltip()
+  tooltip:SetOwner(row, "ANCHOR_LEFT")
+  tooltip:AddLine(entry.label, 1, 1, 1)
   if rawget(row, "skadaPinned") then
-    GameTooltip:AddLine("Pinned while scrolling below your rank.", 0.62, 0.68, 0.76, true)
+    tooltip:AddLine("Pinned while scrolling below your rank.", 0.62, 0.68, 0.76, true)
   end
 
   if entry.modeKey then
-    GameTooltip:AddLine("Click to show this mode.", 0.8, 0.8, 0.8)
+    tooltip:AddLine("Click to show this mode.", 0.8, 0.8, 0.8)
   elseif entry.segment ~= nil then
-    GameTooltip:AddLine("Click to choose this fight.", 0.8, 0.8, 0.8)
+    tooltip:AddLine("Click to choose this fight.", 0.8, 0.8, 0.8)
   elseif entry.threatRow then
     local threatRow = entry.threatRow
     local threatLabel = threatRow.estimated and "Estimated threat" or "Server threat"
-    GameTooltip:AddDoubleLine(threatLabel, tostring(threatRow.threat or 0), 0.8, 0.8, 0.8, 1, 1, 1)
-    GameTooltip:AddDoubleLine("Aggro", tostring(floor((threatRow.percent or 0) + 0.5)) .. "%", 0.8, 0.8, 0.8, 1, 1, 1)
-    GameTooltip:AddDoubleLine("TPS", Skada:FormatNumber(threatRow.tps or 0), 0.8, 0.8, 0.8, 1, 1, 1)
-    GameTooltip:AddDoubleLine("Source", threatRow.estimated and "Local estimate" or "Server", 0.8, 0.8, 0.8, 1, 1, 1)
-    GameTooltip:AddDoubleLine("Status", threatRow.tank and "Tanking" or "Not tanking", 0.8, 0.8, 0.8, 1, 1, 1)
-    GameTooltip:AddDoubleLine("Range", threatRow.melee and "Melee" or "Ranged", 0.8, 0.8, 0.8, 1, 1, 1)
+    tooltip:AddDoubleLine(threatLabel, tostring(threatRow.threat or 0), 0.8, 0.8, 0.8, 1, 1, 1)
+    tooltip:AddDoubleLine("Aggro", tostring(floor((threatRow.percent or 0) + 0.5)) .. "%", 0.8, 0.8, 0.8, 1, 1, 1)
+    tooltip:AddDoubleLine("TPS", Skada:FormatNumber(threatRow.tps or 0), 0.8, 0.8, 0.8, 1, 1, 1)
+    tooltip:AddDoubleLine("Source", threatRow.estimated and "Local estimate" or "Server", 0.8, 0.8, 0.8, 1, 1, 1)
+    tooltip:AddDoubleLine("Status", threatRow.tank and "Tanking" or "Not tanking", 0.8, 0.8, 0.8, 1, 1, 1)
+    tooltip:AddDoubleLine("Range", threatRow.melee and "Melee" or "Ranged", 0.8, 0.8, 0.8, 1, 1, 1)
   elseif entry.spell then
     local spell = entry.spell
     if spell.customText then
-      GameTooltip:AddLine(spell.customText, 0.85, 0.85, 0.85, true)
+      tooltip:AddLine(spell.customText, 0.85, 0.85, 0.85, true)
     else
       if spell.effectiveHealing ~= nil then
         local total = spell.amount or 0
         local effective = spell.effectiveHealing or 0
         local overhealing = spell.overhealing or 0
         local efficiency = total > 0 and effective / total * 100 or 0
-        GameTooltip:AddDoubleLine("Effective (estimated)", Skada:FormatNumber(effective), 0.8, 0.8, 0.8, 0.3, 1, 0.45)
-        GameTooltip:AddDoubleLine("Overheal (estimated)", Skada:FormatNumber(overhealing) .. string.format(" (%.1f%%)", 100 - efficiency), 0.8, 0.8, 0.8, 1, 0.45, 0.35)
-        GameTooltip:AddDoubleLine("Total cast healing", Skada:FormatNumber(total), 0.8, 0.8, 0.8, 1, 1, 1)
-        GameTooltip:AddDoubleLine("Efficiency", string.format("%.1f%%", efficiency), 0.8, 0.8, 0.8, 1, 1, 1)
+        tooltip:AddDoubleLine("Effective (estimated)", Skada:FormatNumber(effective), 0.8, 0.8, 0.8, 0.3, 1, 0.45)
+        tooltip:AddDoubleLine("Overheal (estimated)", Skada:FormatNumber(overhealing) .. string.format(" (%.1f%%)", 100 - efficiency), 0.8, 0.8, 0.8, 1, 0.45, 0.35)
+        tooltip:AddDoubleLine("Total cast healing", Skada:FormatNumber(total), 0.8, 0.8, 0.8, 1, 1, 1)
+        tooltip:AddDoubleLine("Efficiency", string.format("%.1f%%", efficiency), 0.8, 0.8, 0.8, 1, 1, 1)
         if spell.unverifiedHealing and spell.unverifiedHealing > 0 then
-          GameTooltip:AddDoubleLine("No health snapshot", Skada:FormatNumber(spell.unverifiedHealing), 0.8, 0.8, 0.8, 1, 0.82, 0.3)
+          tooltip:AddDoubleLine("No health snapshot", Skada:FormatNumber(spell.unverifiedHealing), 0.8, 0.8, 0.8, 1, 0.82, 0.3)
         end
       else
-        GameTooltip:AddDoubleLine("Total", Skada:FormatNumber(spell.amount or 0), 0.8, 0.8, 0.8, 1, 1, 1)
+        tooltip:AddDoubleLine("Total", Skada:FormatNumber(spell.amount or 0), 0.8, 0.8, 0.8, 1, 1, 1)
       end
-      GameTooltip:AddDoubleLine("Events", tostring(spell.count or 0), 0.8, 0.8, 0.8, 1, 1, 1)
-      if spell.minimum then GameTooltip:AddDoubleLine("Min / Max", Skada:FormatNumber(spell.minimum) .. " / " .. Skada:FormatNumber(spell.maximum), 0.8, 0.8, 0.8, 1, 1, 1) end
+      tooltip:AddDoubleLine("Events", tostring(spell.count or 0), 0.8, 0.8, 0.8, 1, 1, 1)
+      if spell.minimum then tooltip:AddDoubleLine("Min / Max", Skada:FormatNumber(spell.minimum) .. " / " .. Skada:FormatNumber(spell.maximum), 0.8, 0.8, 0.8, 1, 1, 1) end
       if spell.critical and spell.critical > 0 then
         local criticalPercent = spell.count and spell.count > 0 and spell.critical / spell.count * 100 or 0
-        GameTooltip:AddDoubleLine("Critical", tostring(spell.critical) .. string.format(" (%.1f%%)", criticalPercent), 0.8, 0.8, 0.8, 1, 1, 1)
+        tooltip:AddDoubleLine("Critical", tostring(spell.critical) .. string.format(" (%.1f%%)", criticalPercent), 0.8, 0.8, 0.8, 1, 1, 1)
       end
-      if spell.duration then GameTooltip:AddDoubleLine("Observed duration", string.format("%.1fs", spell.duration), 0.8, 0.8, 0.8, 1, 1, 1) end
-      if spell.powerType then GameTooltip:AddDoubleLine("Resource", spell.powerType, 0.8, 0.8, 0.8, 1, 1, 1) end
+      if spell.duration then tooltip:AddDoubleLine("Observed duration", string.format("%.1fs", spell.duration), 0.8, 0.8, 0.8, 1, 1, 1) end
+      if spell.powerType then tooltip:AddDoubleLine("Resource", spell.powerType, 0.8, 0.8, 0.8, 1, 1, 1) end
     end
   elseif entry.actor then
     local actor = entry.actor
-    GameTooltip:AddDoubleLine("Active time", string.format("%.1fs", actor.activeTime or 0), 0.8, 0.8, 0.8, 1, 1, 1)
-    GameTooltip:AddDoubleLine("Damage", Skada:FormatNumber(actor.damage), 0.8, 0.8, 0.8, 1, 1, 1)
-    GameTooltip:AddDoubleLine("Effective healing (estimated)", Skada:FormatNumber(actor.effectiveHealing or actor.healing), 0.8, 0.8, 0.8, 0.3, 1, 0.45)
-    GameTooltip:AddDoubleLine("Overhealing (estimated)", Skada:FormatNumber(actor.overhealing or 0), 0.8, 0.8, 0.8, 1, 0.45, 0.35)
-    GameTooltip:AddDoubleLine("Total cast healing", Skada:FormatNumber(actor.healing), 0.8, 0.8, 0.8, 1, 1, 1)
+    tooltip:AddDoubleLine("Active time", string.format("%.1fs", actor.activeTime or 0), 0.8, 0.8, 0.8, 1, 1, 1)
+    tooltip:AddDoubleLine("Damage", Skada:FormatNumber(actor.damage), 0.8, 0.8, 0.8, 1, 1, 1)
+    tooltip:AddDoubleLine("Effective healing (estimated)", Skada:FormatNumber(actor.effectiveHealing or actor.healing), 0.8, 0.8, 0.8, 0.3, 1, 0.45)
+    tooltip:AddDoubleLine("Overhealing (estimated)", Skada:FormatNumber(actor.overhealing or 0), 0.8, 0.8, 0.8, 1, 0.45, 0.35)
+    tooltip:AddDoubleLine("Total cast healing", Skada:FormatNumber(actor.healing), 0.8, 0.8, 0.8, 1, 1, 1)
     if actor.unverifiedHealing and actor.unverifiedHealing > 0 then
-      GameTooltip:AddDoubleLine("No health snapshot", Skada:FormatNumber(actor.unverifiedHealing), 0.8, 0.8, 0.8, 1, 0.82, 0.3)
+      tooltip:AddDoubleLine("No health snapshot", Skada:FormatNumber(actor.unverifiedHealing), 0.8, 0.8, 0.8, 1, 0.82, 0.3)
     end
-    GameTooltip:AddDoubleLine("Damage taken", Skada:FormatNumber(actor.damageTaken), 0.8, 0.8, 0.8, 1, 1, 1)
+    tooltip:AddDoubleLine("Damage taken", Skada:FormatNumber(actor.damageTaken), 0.8, 0.8, 0.8, 1, 1, 1)
     local hits, misses = actor.hits or 0, actor.misses or 0
     if hits + misses > 0 then
-      GameTooltip:AddDoubleLine("Attacks avoided by target",
+      tooltip:AddDoubleLine("Attacks avoided by target",
         tostring(misses) .. string.format(" (%.0f%%)", misses / (hits + misses) * 100), 0.8, 0.8, 0.8, 1, 1, 1)
     end
     if actor.mitigated and actor.mitigated > 0 then
-      GameTooltip:AddDoubleLine("Outgoing damage mitigated", Skada:FormatNumber(actor.mitigated), 0.8, 0.8, 0.8, 1, 1, 1)
+      tooltip:AddDoubleLine("Outgoing damage mitigated", Skada:FormatNumber(actor.mitigated), 0.8, 0.8, 0.8, 1, 1, 1)
     end
     local mitigation = actor.mitigation
     if mitigation then
@@ -333,14 +335,14 @@ function Presenter:ShowEntryTooltip(row)
           if not detail.countOnly then
             mitigationText = Skada:FormatNumber(observation.amount or 0) .. " (" .. mitigationText .. ")"
           end
-          GameTooltip:AddDoubleLine(detail.label, mitigationText, 0.8, 0.8, 0.8, 1, 1, 1)
+          tooltip:AddDoubleLine(detail.label, mitigationText, 0.8, 0.8, 0.8, 1, 1, 1)
         end
       end
     end
     if actor.avoids and actor.avoids > 0 then
-      GameTooltip:AddDoubleLine("Attacks avoided (dodge/parry/resist)", tostring(actor.avoids), 0.8, 0.8, 0.8, 1, 1, 1)
+      tooltip:AddDoubleLine("Attacks avoided (dodge/parry/resist)", tostring(actor.avoids), 0.8, 0.8, 0.8, 1, 1, 1)
     end
   end
-  GameTooltip:AddLine("Right-click to go back.", 0.55, 0.8, 1)
-  GameTooltip:Show()
+  tooltip:AddLine("Right-click to go back.", 0.55, 0.8, 1)
+  tooltip:Show()
 end

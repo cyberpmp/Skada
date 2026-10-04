@@ -2,6 +2,38 @@
 
 All notable changes to the PMP Skada rewrite are documented here.
 
+## 3.0.2 - 2026-10-05
+
+### Fixed
+
+- Dragging a meter window no longer leaves the saved geometry blank when the
+  vanilla client answers `GetPoint` with no anchor after rebuilding the
+  window's anchors mid-drag. Reading an incomplete anchor keeps the window's
+  last stored position instead, and the layout pass repairs any corrupt or
+  half-missing position in place rather than throwing the
+  `SetPoint` usage error on every rebuild after it.
+- Meter tooltips no longer render on the Blizzard-shared `GameTooltip`.
+  Every Skada tooltip (meter rows, window header, report and settings
+  buttons) draws on a private `SkadaTooltip` frame instead. Other UI
+  surfaces drive the shared tooltip from under us — the transmogrify
+  service feeds item hyperlinks into it to make the server fetch item
+  data, then builds its per-slot available-item lists from the client's
+  item cache, and an owning or hiding call from Skada while that fetch was
+  in flight swallowed the data: some slots stopped listing their available
+  transmogs while a meter tooltip was on screen. Skada's tooltips are now
+  invisible to everything outside the addon, and a new `isolation` suite
+  instruments the shared `GameTooltip` and asserts zero traffic from boot,
+  repaints and every hover/leave path.
+- The global `string.split`/`strsplit` shim this addon provides for other
+  addons follows the standard split contract now: empty fields are kept
+  ("a::b" splits to "a", "", "b" — the previous shim dropped them and
+  collapsed delimiter runs, which broke parsers that count their fields),
+  delimiter characters are matched literally (a `%` or `[` in the
+  delimiter list can no longer corrupt the scan), non-string values are
+  read as text instead of erroring, and the optional `pieces` argument
+  caps the field count with the remainder staying in the final field.
+  Skada itself never calls it.
+
 ## 3.0.1 - 2026-10-02
 
 ### Fixed

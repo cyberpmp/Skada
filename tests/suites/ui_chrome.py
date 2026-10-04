@@ -367,6 +367,66 @@ def run(ctx: Context):
       assert(gridWindow.layoutDirty, "PersistGeometry did not mark the layout dirty")
     ''')
     ctx.run('''
+      -- A frame whose GetPoint comes back empty (the vanilla client after
+      -- an engine rebuild of the anchors during a drag) must not nil the
+      -- window's stored geometry: the next ApplyLayout would anchor with
+      -- nils and throw the SetPoint usage error on every rebuild after.
+      local Style = Skada.UIStyle
+      local savedGeometry = { rows = 10, barHeight = 18, barSpacing = 2, hideTitle = true }
+      local draggedFrame = {
+        GetWidth = function() return 240 end,
+        GetHeight = function() return Style:GetWindowHeight(savedGeometry, 10) end,
+        SetHeight = function() end,
+        GetPoint = function() return nil end,
+      }
+      local draggedWindow = {
+        frame = draggedFrame,
+        db = { barHeight = 18, barSpacing = 2, hideTitle = true,
+          point = "TOPLEFT", relativePoint = "TOPLEFT", x = 10, y = -10 },
+        manager = { NotifyWindowChanged = function() end },
+      }
+      Skada.UISnapDock.PersistGeometry(draggedWindow, true)
+      assert(draggedWindow.db.point == "TOPLEFT"
+        and draggedWindow.db.relativePoint == "TOPLEFT"
+        and draggedWindow.db.x == 10 and draggedWindow.db.y == -10,
+        "an anchor-less GetPoint read wiped the stored geometry")
+
+      -- A frame with no stored anchor either (a window whose layout never
+      -- ran when the read happened) falls back to a legal anchor instead.
+      local bareWindow = {
+        frame = { GetWidth = function() return 240 end,
+          GetHeight = function() return 300 end, SetHeight = function() end,
+          GetPoint = function() return nil end },
+        db = { barHeight = 18, barSpacing = 2 },
+        manager = { NotifyWindowChanged = function() end },
+      }
+      Skada.UISnapDock.PersistGeometry(bareWindow, true)
+      assert(bareWindow.db.point == "CENTER"
+        and bareWindow.db.relativePoint == "CENTER"
+        and bareWindow.db.x == 0 and bareWindow.db.y == 0,
+        "a first anchor-less GetPoint read left no legal anchor behind")
+    ''')
+    ctx.run('''
+      -- ApplyLayout itself must never hand the engine a nil or non-string
+      -- anchor: corrupt or half-missing saved geometry is repaired in the
+      -- window's settings instead of throwing the SetPoint usage error.
+      local meter = Skada.UI:GetPrimary()
+      local saved = {
+        point = meter.db.point, relativePoint = meter.db.relativePoint,
+        x = meter.db.x, y = meter.db.y,
+      }
+      meter.db.point, meter.db.relativePoint, meter.db.x, meter.db.y = nil, nil, "bad", -0.5
+      meter.layoutDirty = true
+      meter:ApplyLayout()
+      assert(meter.db.point == "CENTER" and meter.db.relativePoint == "CENTER"
+        and meter.db.x == 0 and meter.db.y == -0.5,
+        "ApplyLayout did not repair the corrupt geometry in place")
+      meter.db.point, meter.db.relativePoint, meter.db.x, meter.db.y
+        = saved.point, saved.relativePoint, saved.x, saved.y
+      meter.layoutDirty = true
+      meter:ApplyLayout()
+    ''')
+    ctx.run('''
       -- A fractional row count (a snap-copied off-grid height) must fill the
       -- window to its bottom edge: the whole rows paint at full height and
       -- the remainder paints as a short trailing bar instead of leaving an

@@ -66,14 +66,35 @@ function Common.GetWheelDelta(positional)
   return tonumber(arg1) or 0
 end
 
+-- Every Skada tooltip lives on this private frame instead of the Blizzard
+-- shared GameTooltip. Other UIs drive the shared tooltip under our feet: the
+-- transmogrify service, for example, feeds item hyperlinks into it to force
+-- the server to fetch item data, then redraws its slot lists from whatever
+-- landed in the client's item cache. Owning the shared tooltip (SetOwner) or
+-- hiding it is enough to swallow exactly the data they were waiting on --
+-- observed as transmog slots that stop listing their available items while
+-- a meter tooltip was on screen. A private instance cannot collide with
+-- anything outside Skada.
+local tooltipFrame
+
+function Common.GetTooltip()
+  if not tooltipFrame then
+    tooltipFrame = CreateFrame("GameTooltip", "SkadaTooltip", UIParent, "GameTooltipTemplate")
+  end
+  return tooltipFrame
+end
+
 function Common.AttachTooltip(button, title, description)
   button:SetScript("OnEnter", function()
-    GameTooltip:SetOwner(button, "ANCHOR_LEFT")
-    GameTooltip:AddLine(title, 1, 1, 1)
-    GameTooltip:AddLine(description, 0.8, 0.8, 0.8, true)
-    GameTooltip:Show()
+    local tooltip = Common.GetTooltip()
+    tooltip:SetOwner(button, "ANCHOR_LEFT")
+    tooltip:AddLine(title, 1, 1, 1)
+    tooltip:AddLine(description, 0.8, 0.8, 0.8, true)
+    tooltip:Show()
   end)
-  button:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  button:SetScript("OnLeave", function()
+    if tooltipFrame then tooltipFrame:Hide() end
+  end)
 end
 
 Common.FONT = "Interface\\AddOns\\Skada\\media\\Accidental Presidency.ttf"

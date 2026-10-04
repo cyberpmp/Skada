@@ -171,8 +171,21 @@ function SnapDock.PersistGeometry(window, persistPoint)
   end
   window.layoutDirty = true
   if persistPoint then
+    -- A frame whose anchors the engine rebuilt (dragged on the vanilla
+    -- client, or a never-laid-out frame) reports no anchor: storing that
+    -- nils the geometry and the next ApplyLayout throws the SetPoint
+    -- usage error on every rebuild after it. A read that comes back
+    -- incomplete keeps the window's last stored anchor instead.
     local point, _, relativePoint, x, y = frame:GetPoint(1)
-    profile.point, profile.relativePoint, profile.x, profile.y = point, relativePoint, x, y
+    if type(point) == "string" and type(relativePoint) == "string"
+      and type(x) == "number" and type(y) == "number" then
+      profile.point, profile.relativePoint, profile.x, profile.y = point, relativePoint, x, y
+    elseif profile.point == nil or profile.relativePoint == nil
+      or type(profile.x) ~= "number" or type(profile.y) ~= "number" then
+      -- Nothing valid was stored either: fall back to a legal anchor so
+      -- the layout pass never runs out of geometry.
+      profile.point, profile.relativePoint, profile.x, profile.y = "CENTER", "CENTER", 0, 0
+    end
   end
   window.manager:NotifyWindowChanged(window)
 end

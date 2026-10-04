@@ -100,25 +100,33 @@ def run(ctx: Context):
     assert parser.GetMissCount(parser) == misses_before + 1
     lua.globals().SlashCmdList.SKADA("status")
     ctx.run('''
-      local savedAddDoubleLine = GameTooltip.AddDoubleLine
-      GameTooltip.captured = {}
-      GameTooltip.AddDoubleLine = function(self, label, value)
+      -- Skada draws its entry tooltips on its own GameTooltip frame
+      -- (Common.GetTooltip), never on the Blizzard-shared one. Other UIs
+      -- drive the shared tooltip to fetch item data and break if we own or
+      -- hide it. Capture through the private frame; if the code regressed to
+      -- the shared GameTooltip, these captures would go dark and fail.
+      local tooltip = Skada.Common.GetTooltip()
+      assert(tooltip ~= GameTooltip)
+      local savedAddDoubleLine = tooltip.AddDoubleLine
+      tooltip.captured = {}
+      tooltip.AddDoubleLine = function(self, label, value)
         self.captured[label] = value
       end
       Skada.UIPresenter:ShowEntryTooltip({ entry = {
         label = "Greater Heal",
         spell = Skada.Data.current.actors.Bob.healingSpells["Greater Heal"],
       } })
-      assert(GameTooltip.captured.Critical == "1 (50.0%)")
-      assert(GameTooltip.captured["Effective (estimated)"] == "400")
-      assert(GameTooltip.captured["Overheal (estimated)"] == "500 (55.6%)")
-      GameTooltip.captured = {}
+      assert(tooltip.captured.Critical == "1 (50.0%)")
+      assert(tooltip.captured["Effective (estimated)"] == "400")
+      assert(tooltip.captured["Overheal (estimated)"] == "500 (55.6%)")
+      tooltip.captured = {}
       Skada.UIPresenter:ShowEntryTooltip({ entry = {
         label = "Bob",
         actor = Skada.Data.current.actors.Bob,
       } })
-      assert(GameTooltip.captured["Effective healing (estimated)"] == "400")
-      assert(GameTooltip.captured["Overhealing (estimated)"] == "500")
+      assert(tooltip.captured["Effective healing (estimated)"] == "400")
+      assert(tooltip.captured["Overhealing (estimated)"] == "500")
+      tooltip.AddDoubleLine = savedAddDoubleLine
       local healingMode = Skada.Modes:Get("healing")
       assert(Skada.Modes:GetActorValue(healingMode, Skada.Data.current.actors.Bob) == 400)
       assert(Skada.Modes:GetActorText(healingMode, Skada.Data.current.actors.Bob, Skada.Data.current)
@@ -139,7 +147,6 @@ def run(ctx: Context):
       assert(not rawget(meter.rows[1], "totalBar"), "standard healing created an overheal bar")
       meter.db.mode = "damage"
       meter:Refresh()
-      GameTooltip.AddDoubleLine = savedAddDoubleLine
     ''')
     assert alice.damageTaken == 50, alice.damageTaken
     assert alice.deaths == 1, alice.deaths

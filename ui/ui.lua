@@ -8,6 +8,7 @@ local windowMeta = { __index = UI }
 local Common = Skada.Common
 local getClickButton = Common.GetClickButton
 local getWheelDelta = Common.GetWheelDelta
+local getTooltip = Common.GetTooltip
 local Style = Skada.UIStyle
 
 local floor = math.floor
@@ -358,16 +359,17 @@ function UI:InitializeWindow(config)
   header:SetScript("OnEnter", function(self)
     local buttonIndex
     for buttonIndex = 1, table_getn(headerButtons) do headerButtons[buttonIndex]:SetAlpha(1) end
-    GameTooltip:SetOwner(self, "ANCHOR_TOP")
-    GameTooltip:AddLine(owner.currentTitle or config.name or "Skada", 1, 0.5, 0)
-    GameTooltip:AddLine("Left-click forward, right-click back, or drag to move.", 0.8, 0.8, 0.8)
-    GameTooltip:AddLine("This window has independent mode and segment settings.", 0.8, 0.8, 0.8, true)
-    GameTooltip:Show()
+    local tooltip = getTooltip()
+    tooltip:SetOwner(self, "ANCHOR_TOP")
+    tooltip:AddLine(owner.currentTitle or config.name or "Skada", 1, 0.5, 0)
+    tooltip:AddLine("Left-click forward, right-click back, or drag to move.", 0.8, 0.8, 0.8)
+    tooltip:AddLine("This window has independent mode and segment settings.", 0.8, 0.8, 0.8, true)
+    tooltip:Show()
   end)
   header:SetScript("OnLeave", function()
     local buttonIndex
     for buttonIndex = 1, table_getn(headerButtons) do headerButtons[buttonIndex]:SetAlpha(Style.HEADER_BUTTON_ALPHA) end
-    GameTooltip:Hide()
+    getTooltip():Hide()
   end)
 
   local resizeButton = CreateFrame("Button", nil, frame)

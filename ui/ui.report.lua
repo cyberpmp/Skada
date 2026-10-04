@@ -5,6 +5,7 @@ Skada.UIReport = Report
 
 local Common = Skada.Common
 local setReadableFont = Common.SetFont
+local getTooltip = Common.GetTooltip
 local Style = Skada.UIStyle
 
 local table_getn = table.getn
@@ -86,19 +87,20 @@ function Report:CreateHeaderButton(parent, spec)
   button:SetScript("OnEnter", function(self)
     Style:ApplyButton(self, true)
     self:SetAlpha(1)
-    GameTooltip:SetOwner(self, "ANCHOR_TOP")
-    GameTooltip:AddLine(spec.title, 1, 1, 1)
+    local tooltip = getTooltip()
+    tooltip:SetOwner(self, "ANCHOR_TOP")
+    tooltip:AddLine(spec.title, 1, 1, 1)
     if spec.status then
       local status, red, green, blue = spec.status()
-      if status then GameTooltip:AddLine(status, red or 0.8, green or 0.8, blue or 0.8) end
+      if status then tooltip:AddLine(status, red or 0.8, green or 0.8, blue or 0.8) end
     end
-    if spec.description then GameTooltip:AddLine(spec.description, 0.8, 0.8, 0.8, true) end
-    GameTooltip:Show()
+    if spec.description then tooltip:AddLine(spec.description, 0.8, 0.8, 0.8, true) end
+    tooltip:Show()
   end)
   button:SetScript("OnLeave", function(self)
     Style:ApplyButton(self, false)
     self:SetAlpha(Style.HEADER_BUTTON_ALPHA)
-    GameTooltip:Hide()
+    getTooltip():Hide()
   end)
   return button
 end

@@ -71,14 +71,18 @@ def run(ctx: Context):
       primary:Refresh()
       assert(primary.display[2].text == "1834 (600 TPS, 99%)")
 
-      local savedAddDoubleLine = GameTooltip.AddDoubleLine
-      GameTooltip.captured = {}
-      GameTooltip.AddDoubleLine = function(self, label, value)
+      -- capture through Skada's private tooltip frame (the entry tooltip
+      -- never draws on the Blizzard-shared GameTooltip, which other UIs
+      -- need for their own purposes)
+      local tooltip = Skada.Common.GetTooltip()
+      local savedAddDoubleLine = tooltip.AddDoubleLine
+      tooltip.captured = {}
+      tooltip.AddDoubleLine = function(self, label, value)
         self.captured[label] = value
       end
       primary:ShowEntryTooltip({ entry = primary.display[2] })
-      assert(GameTooltip.captured.TPS == "600")
-      GameTooltip.AddDoubleLine = savedAddDoubleLine
+      assert(tooltip.captured.TPS == "600")
+      tooltip.AddDoubleLine = savedAddDoubleLine
 
       TestSetTime(103)
       Skada.Threat:OnAddonMessage("CHAT_MSG_ADDON", "SERVER", "TWTv4=Alice:0:2434:100:0")

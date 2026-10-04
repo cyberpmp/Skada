@@ -6,6 +6,7 @@ Skada.UIRowRenderer = Renderer
 local Common = Skada.Common
 local getClickButton = Common.GetClickButton
 local getWheelDelta = Common.GetWheelDelta
+local getTooltip = Common.GetTooltip
 local setReadableFont = Common.SetFont
 local Style = Skada.UIStyle
 local BAR_EASE = Style.BAR_EASE
@@ -16,6 +17,15 @@ local floor = math.floor
 local max = math.max
 local min = math.min
 local table_getn = table.getn
+
+-- Anchor names the window frame's SetPoint accepts; anything else in the
+-- stored geometry (a nil read by PersistGeometry on the vanilla client,
+-- a hand-edited save) is repaired instead of thrown at the engine.
+local VALID_ANCHORS = {
+  TOPLEFT = true, TOP = true, TOPRIGHT = true,
+  LEFT = true, CENTER = true, RIGHT = true,
+  BOTTOMLEFT = true, BOTTOM = true, BOTTOMRIGHT = true,
+}
 
 -- How much of the bar's colour the continuation keeps; the rest reads as
 -- the row background showing through.
@@ -162,7 +172,7 @@ function Renderer:CreateRow(index)
   end)
   row:SetScript("OnLeave", function(self)
     self.hover:Hide()
-    GameTooltip:Hide()
+    getTooltip():Hide()
   end)
 
   self.rows[index] = row
@@ -183,8 +193,20 @@ function Renderer:ApplyLayout()
   local height = Style:GetWindowHeight(profile, profile.rows)
   self.frame:SetWidth(profile.width)
   self.frame:SetHeight(height)
+  -- The window's own four position fields must all be real before the
+  -- engine is asked to anchor with them, or SetPoint throws its usage
+  -- error for every rebuild that follows. Repair in place rather than
+  -- crash: whatever a field misses falls back to the centered window.
+  local point, relativePoint = profile.point, profile.relativePoint
+  if not VALID_ANCHORS[point] then point = "CENTER" end
+  if not VALID_ANCHORS[relativePoint] then relativePoint = "CENTER" end
+  local x, y = tonumber(profile.x) or 0, tonumber(profile.y) or 0
+  if profile.point ~= point or profile.relativePoint ~= relativePoint
+    or profile.x ~= x or profile.y ~= y then
+    profile.point, profile.relativePoint, profile.x, profile.y = point, relativePoint, x, y
+  end
   self.frame:ClearAllPoints()
-  self.frame:SetPoint(profile.point, UIParent, profile.relativePoint, profile.x, profile.y)
+  self.frame:SetPoint(point, UIParent, relativePoint, x, y)
   self.frame:SetMovable(not profile.locked)
   self.frame:SetResizable(not profile.locked)
   self.frame:SetMinResize(Style.MIN_WINDOW_WIDTH, Style:GetWindowHeight(profile, Style.MIN_ROWS))
@@ -430,7 +452,8 @@ function Renderer:PaintRows()
     else
       if row:IsShown() then row:Hide() end
 
-      if GameTooltip.IsOwned and GameTooltip:IsOwned(row) then GameTooltip:Hide() end
+      local tooltip = getTooltip()
+      if tooltip.IsOwned and tooltip:IsOwned(row) then tooltip:Hide() end
       row.smoothEntry = nil
       row.smoothValue = nil
       if row.lastExtraShown then
