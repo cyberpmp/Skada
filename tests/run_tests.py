@@ -12,11 +12,12 @@ import sys
 import time
 import traceback
 
-from harness import Context, lint_script_hooks, lint_upvalue_aliases, load_addon
+from harness import Context, lint_frame_factory, lint_private_library, lint_script_hooks, lint_upvalue_aliases, load_addon
 from suites import (
     auras,
     boot,
     boss_detection,
+    budget_scans,
     combat,
     debuffs,
     isolation,
@@ -44,6 +45,7 @@ SUITES = [
     segments,
     debuffs,
     render_loop,
+    budget_scans,
     boss_detection,
     options,
     nampower,
@@ -58,6 +60,8 @@ def main():
 
     lint_upvalue_aliases()
     lint_script_hooks()
+    lint_private_library()
+    lint_frame_factory()
     lua, skada = load_addon()
     ctx = Context(lua, skada)
 

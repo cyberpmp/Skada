@@ -1,4 +1,7 @@
 local Skada = (_G or getfenv(0)).Skada
+local CreateFrame = SkadaCompat.CreateFrame
+local table_insert = SkadaCompat.Table.insert
+local table_remove = SkadaCompat.Table.remove
 
 local UI = { windows = {}, byID = {} }
 Skada.UI = UI
@@ -14,7 +17,7 @@ local Style = Skada.UIStyle
 local floor = math.floor
 local max = math.max
 local min = math.min
-local table_getn = table.getn
+local table_getn = SkadaCompat.Table.getn
 
 local setReadableFont = Common.SetFont
 
@@ -81,7 +84,7 @@ function UI:NeedsContinuousRefresh(now)
   for windowIndex = 1, table_getn(windows) do
     window = windows[windowIndex]
     if not window.broken and window.db.visible then
-      if window.view == "mode" and window.db.mode == "threat" then
+      if window.view == "mode" and Skada.Threat.HoldsThreat(window) then
         wantsThreat = true
       elseif dataActive then
         if window.view == "segments" then return true end
@@ -94,8 +97,7 @@ function UI:NeedsContinuousRefresh(now)
       end
     end
   end
-  return wantsThreat and Skada.Threat and Skada.Threat.NeedsUpdates
-    and Skada.Threat:NeedsUpdates(now, true) or false
+  return wantsThreat and Skada.Threat:NeedsUpdates(now, true) or false
 end
 
 function UI:SetView(view)
@@ -283,7 +285,7 @@ function UI:InitializeWindow(config)
 
   local menuButton = UIReport:CreateHeaderButton(header, {
     texture = "Interface\\Icons\\INV_Misc_Gear_01", title = "More actions",
-    description = "Settings, logging, reporting, window actions, and reset.",
+    description = "Settings, reporting, window actions, and reset.",
     click = function()
       owner.manager:SetActive(owner)
       owner.actionMenu:Toggle()
@@ -473,7 +475,7 @@ function UI:CreateWindow(config)
     scrollOffset = 0,
     displayCount = 0,
   }, windowMeta)
-  table.insert(self.windows, window)
+  table_insert(self.windows, window)
   self.byID[config.id] = window
   local ok, message = pcall(window.InitializeWindow, window, config)
   if not ok then
@@ -502,7 +504,7 @@ function UI:CreateNew(name)
   if source and source.db.restoreMode then
     config.restoreMode, config.restoreSegment = source.db.restoreMode, source.db.restoreSegment
   end
-  table.insert(profile.windows, config)
+  table_insert(profile.windows, config)
   local window = self:CreateWindow(config)
   self:SetActive(window)
   Skada:MarkDirty()
@@ -522,12 +524,12 @@ function UI:DeleteWindow(window)
   self.byID[window.db.id] = nil
   local windowIndex
   for windowIndex = table_getn(self.windows), 1, -1 do
-    if self.windows[windowIndex] == window then table.remove(self.windows, windowIndex) break end
+    if self.windows[windowIndex] == window then table_remove(self.windows, windowIndex) break end
   end
   local configIndex
   for configIndex = table_getn(Skada.db.profile.windows), 1, -1 do
     if Skada.db.profile.windows[configIndex] == window.db then
-      table.remove(Skada.db.profile.windows, configIndex)
+      table_remove(Skada.db.profile.windows, configIndex)
       break
     end
   end
@@ -785,13 +787,31 @@ end)
 Skada:RegisterInitializer(function() UI:Initialize() end, "bar windows")
 
 local RenderPolicy = {}
+-- Live-but-quiet window families (mode summaries, fight durations, uptime
+-- meters, threat estimation) depend on the clock or on their own tickers
+-- rather than on incoming records, and every clock-driven label they read is
+-- second-granular, so re-checking them at the 250 ms rebuild cadence was four
+-- times more repaints than any of them can display a change for. The check is
+-- therefore gated to at most once per second; genuine data changes still
+-- arrive immediately through Skada:MarkDirty and build at the full cadence.
+local LIVE_REFRESH_CADENCE = 1
+RenderPolicy.wallClockCheck = 0
 
 function RenderPolicy:ShouldRebuild(now)
-  return Skada.dirty or (UI.NeedsContinuousRefresh and Skada.UI:NeedsContinuousRefresh(now))
+  if Skada.dirty then return true end
+  if now and now - self.wallClockCheck >= LIVE_REFRESH_CADENCE then
+    self.wallClockCheck = now
+    return UI.NeedsContinuousRefresh and Skada.UI:NeedsContinuousRefresh(now) or false
+  end
+  return false
 end
 
-function RenderPolicy:Rebuild()
+function RenderPolicy:Rebuild(now)
   Skada.UI:RefreshAll()
+  -- One build, data-driven or clock-driven, consumed the wall-clock window:
+  -- a full repaint must never follow a full repaint just because the dirty
+  -- path used the previous check's slot.
+  if now then self.wallClockCheck = now end
 end
 
 function RenderPolicy:ShouldAnimate()

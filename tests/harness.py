@@ -45,6 +45,45 @@ def lint_upvalue_aliases():
             )
 
 
+PRIVATE_LIBRARY_RE = re.compile(
+    r"(?<![\w.])(?:table\.(?:getn|setn|insert|remove|sort|concat|foreachi)\b"
+    r"|unpack\(|string\.(?:match|split|trim)\b|:(?:match|split|trim)\(|strmatch\(|strsplit\(|strtrim\(|hooksecurefunc\()"
+)
+
+
+def lint_private_library():
+    """Skada's files reach the table library and string helpers only through
+    SkadaCompat (core/core.compat.lua). The client's own getn/sort/concat
+    read a side-tracked length that goes stale, and the globals belong to
+    every other addon, so Skada neither calls nor replaces them."""
+    for filename in toc_load_list():
+        if filename == "core/core.compat.lua":
+            continue
+        source = (ROOT / filename).read_text(encoding="utf-8")
+        match = PRIVATE_LIBRARY_RE.search(source)
+        assert match is None, (
+            f"{filename}: {match.group(0)!r} uses a shared global; "
+            f"take it from SkadaCompat instead"
+        )
+
+
+def lint_frame_factory():
+    """Skada builds its frames through SkadaCompat.CreateFrame, which
+    remembers explicit sizes so GetWidth/GetHeight read them before the first
+    render. A file calling the client's CreateFrame gets frames that read 0
+    until drawn, and layout that sizes children right after building them
+    collapses."""
+    for filename in toc_load_list():
+        if filename == "core/core.compat.lua":
+            continue
+        source = (ROOT / filename).read_text(encoding="utf-8")
+        if "CreateFrame(" in source:
+            assert "local CreateFrame = SkadaCompat.CreateFrame" in source, (
+                f"{filename}: calls CreateFrame without "
+                f"`local CreateFrame = SkadaCompat.CreateFrame`"
+            )
+
+
 def lint_script_hooks():
     """The client's HookScript runs the original handler without its
     positional arguments (AceGUI's sizer handler died on a nil frame in game
@@ -60,6 +99,22 @@ def lint_script_hooks():
         )
 
 
+SHARED_GLOBALS_SNAPSHOT = '''
+TestSharedGlobals = {}
+local libraryName, key, value
+for _, libraryName in ipairs({ "table", "string", "math" }) do
+  for key, value in pairs(_G[libraryName]) do
+    TestSharedGlobals[libraryName .. "." .. key] = value
+  end
+end
+for _, key in ipairs({ "CreateFrame", "unpack", "select", "hooksecurefunc", "wipe",
+    "strsplit", "strmatch", "strtrim", "loadstring", "floor", "ceil", "max", "min",
+    "ChatEdit_InsertLink" }) do
+  TestSharedGlobals[key] = _G[key] or false
+end
+'''
+
+
 def load_addon():
     """Load the addon in a stubbed environment.
 
@@ -71,25 +126,15 @@ def load_addon():
     lua = LuaRuntime(unpack_returned_tuples=True)
     lua.execute(STUBS_PATH.read_text(encoding="utf-8"))
     loadfile = lua.globals().loadfile
+    # Skada must leave every shared library and API global exactly as the
+    # client had it; the boot suite compares against this snapshot.
+    lua.execute(SHARED_GLOBALS_SNAPSHOT)
     files = toc_load_list()
-    # Load in exact .toc order. string.match is nilled right after
-    # core/core.compat.lua: Skada's own hand-written files keep the
-    # vanilla-Lua-5.0-purity guard that catches accidental Lua-5.1-only
-    # stdlib usage (the compat layer itself is exempt — its probe/repair
-    # code is about string.match, not a user of it). (When the vendored
-    # Ace3 stack under libs/ still existed, the nil point was right after
-    # the last libs/ file instead, since that code needed
-    # string.match/split/trim present.)
-    match_nil_after_index = next(
-        (index for index, filename in enumerate(files)
-         if filename == "core/core.compat.lua"),
-        None,
-    )
-    for index, filename in enumerate(files):
+    # Load in exact .toc order. lint_private_library keeps Skada's files off
+    # string.match; the global stays as the stubs installed it.
+    for filename in files:
         chunk = loadfile(str(ROOT / filename))
         chunk()
-        if index == match_nil_after_index:
-            lua.execute("string.match = nil")
     namespace = lua.globals().Skada
     namespace.Initialize(namespace)
     return lua, namespace

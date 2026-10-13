@@ -38,7 +38,7 @@ ownership clear in search results while preserving explicit TOC ordering.
 
 | Layer | Modules | Responsibility |
 | --- | --- | --- |
-| Foundation | `core/core.compat.lua`, `core/core.common.lua`, `core/core.defaults.lua`, `core/core.runtime.lua`, `ui/ui.style.lua` | Client-gap shims and stdlib repairs, compatibility helpers, profile defaults, lifecycle, events, tickers, internal messages, rendering policy, and shared visuals |
+| Foundation | `core/core.compat.lua`, `core/core.common.lua`, `core/core.defaults.lua`, `core/core.runtime.lua`, `ui/ui.style.lua` | Skada's private compatibility layer (`SkadaCompat`), shared helpers, profile defaults, lifecycle, events, tickers, internal messages, rendering policy, and shared visuals |
 | Identity and data | `data/data.identity.lua`, `data/data.aggregator.lua`, `data/data.boss.lua`, `data/data.segments.lua`, `data/data.navigation.lua`, `data/data.lua`, `data/data.reset.lua` | Roster and pet ownership, aggregate mutation, boss recognition, segment lifecycle, history navigation, the data facade, and reset policies |
 | Threat | `threat/threat.estimate.lua`, `threat/threat.lua` | Combat-scoped local estimates and the authoritative server threat provider (Threat API v1; wire strings `TWT_UDTSv4` query and `TWTv4=` reply, kept verbatim as `THREAT_APIV1_QUERY`/`THREAT_APIV1_REPLY`) |
 | Enrichment | `tracking/tracking.spells.lua`, `tracking/tracking.casts.lua`, `tracking/tracking.auras.lua`, `tracking/tracking.damage.lua`, `tracking/tracking.group.lua`, `tracking/tracking.lua` | Spell metadata, cast correlation, dispels, interrupts, aura uptime, last-hit evidence, and group observation |
@@ -159,7 +159,10 @@ Amounts without a readable health snapshot also increment
 `Parser:AddGlobal` reads localized client format strings. `Parser:AddPattern`
 is reserved for confirmed literal formats that have no available global name.
 The compiler supports positional placeholders such as `%2$s` and currently
-passes at most five captures to an adapter.
+passes at most five captures to an adapter. Both take the fact the handler
+records as their first argument; `Parser:SuppressFact` turns a fact off, and a
+route then tries only its live patterns, dropping a line that a suppressed
+pattern ahead of the match also matches.
 
 Mitigation trailers are removed before the base message is matched. Their type
 and amount are held in file-local state for the duration of that one synchronous
@@ -210,26 +213,19 @@ FontString, which cannot come up blank), and the dialog's layout is pure
 arithmetic (nothing reads a rendered rect, so there is no reflow and a
 control is laid out correctly the first time it is built).
 
-`core/core.compat.lua` still loads first and fills in or repairs globals
-this client lacks or other addons break (`string.match` is probed and
-replaced when RollFor has clobbered it, `string.split`, the length-tracking
-`table.*` functions, `table.sort`) and wraps `CreateFrame` so that
-`GetWidth`/`GetHeight` report an explicit size while the client's rect still
+`core/core.compat.lua` loads first and builds Skada's private
+compatibility layer; it replaces and adds no global (see
+[docs/isolation.md](docs/isolation.md)). `SkadaCompat.Table` is the
+length-tracking table library every Skada file takes its `table_*` locals
+from, `SkadaCompat.Match` is a probed `string.match` (RollFor clobbers the
+global), and `SkadaCompat.CreateFrame` makes Skada's frames report an
+explicit size from `GetWidth`/`GetHeight` while the client's rect still
 reads 0 (the client only computes anchor-derived rects at render time, and
 any layout that sizes a child from such a read synchronously would inherit
-width 0). The wrapper's remaining fixes stay `.obj`-gated so BigDebuffs'
-own bundled Ace3 keeps benefiting from them: an explicit size wins outright
-and a rendered rect is divided by the effective scale for AceGUI frames (the
-client reports anchor-derived rects in screen units, which fed back through
-its Fill layout shrank the pane on every rebuild), TreeGroup's
-`OptionsListButtonTemplate` rows are built from scratch (the client's
-template OnLoad never populates the `.toggle`/`.text` fields TreeGroup
-indexes), and `SetParent` re-derives the moved frame's strata and frame
-level from its new parent, subtree included
-(`SkadaCompat.InheritLayering`) — the client leaves both untouched on
-reparenting. The same gap applies to Blizzard's shared `ColorPickerFrame`:
-the compat layer hooks its OnShow to carry its layering down to its
-Okay/Cancel children (toplevel off while shown, restored on hide).
+width 0). Blizzard's shared `ColorPickerFrame` has the same layering gap:
+while Skada's color control owns it, an appended OnShow carries its
+layering down to its Okay/Cancel children, and OnHide restores its strata,
+level and toplevel flag.
 
 The dialog root is a fixed 769×640 frame at HIGH strata — above the meter
 windows (LOW) and the normal UI (MEDIUM), below DIALOG where the StaticPopup
@@ -315,7 +311,7 @@ into one.
   programmatic change);
 - **color** — a swatch button configuring Blizzard's shared
   `ColorPickerFrame`, level-bumped above the dialog and re-layered through
-  the compat hook before `Show()`;
+  the compat hook while Skada owns it, restored when it closes;
 - **input** — the one remaining EditBox (the window name), wearing
   InputBoxTemplate's border under a gold caption. Text is NEVER
   set at build time: the value is queued and a one-shot plain-Frame driver
@@ -343,7 +339,7 @@ schema both read; `Schema:BuildOptions()` builds the whole tree
 (the three pages in `Schema.PAGES` order plus a `windows` group whose
 `args` holds one nested group per meter window, keyed `window_<id>`, and
 nothing else) for tests and tooling. Pages follow ownership: General is how
-Skada behaves (tracking, minimap, combat-file logging, and window snapping
+Skada behaves (tracking, minimap, and window snapping
 distance and gap — stored on every window but edited
 once through `Schema.SnapSet`, which writes every window and the profile;
 profile migration 7 gave older profiles' windows the primary's values),
@@ -403,15 +399,14 @@ selected window is deleted.
 
 ## Verification
 
-The global table compatibility repairs cache discovered list lengths while
-checking their boundaries for external changes; a `table.setn` shrink
-additionally truncates the table's tail, so Lua-5.0-style callers that
-clear and refill a list (setn(0), insert, setn(display count)) keep tracked
-length and contents in agreement. Sorting uses in-place
-introsort with insertion sort for small ranges and a heapsort fallback at
-the partition-depth limit. This bounds worst-case work to O(n log n) and
-stack depth to O(log n), including sorted and duplicate-heavy input from
-other addons using the global shim.
+The private table library caches discovered list lengths and resumes the
+scan from the cached length when a table grew behind its back; a `setn`
+shrink additionally truncates the table's tail, so a list cleared and
+refilled (setn(0), insert, setn(display count)) keeps tracked length and
+contents in agreement. Sorting uses in-place introsort with insertion sort
+for small ranges and a heapsort fallback at the partition-depth limit. This
+bounds worst-case work to O(n log n) and stack depth to O(log n), including
+sorted and duplicate-heavy input.
 
 Run the test suite after changing runtime code, TOC order, SavedVariables,
 parsing, or UI behavior:
@@ -435,8 +430,10 @@ part of the contract.
 
 The test loader parses `Skada.toc`, so a missing file or load-order regression
 fails before behavioral assertions run. It also reproduces RollFor's
-captures-only `string.match` clobber before the addon loads, so the
-probe-and-replace in `core/core.compat.lua` is exercised as it is in game,
-nils `string.match` right after `core/core.compat.lua` loads so Skada's own
-files stay Lua 5.0 pure, and checks locally aliased standard-library
-functions used by runtime modules.
+captures-only `string.match` clobber before the addon loads, so the probe
+in `core/core.compat.lua` is exercised as it is in game, nils `string.match`
+right after `core/core.compat.lua` loads so Skada's own files stay Lua 5.0
+pure, and checks locally aliased standard-library functions used by runtime
+modules. It snapshots every shared library member and API global before the
+addon loads (the `boot` suite fails if Skada changed one) and lints Skada's
+files for any direct use of the shared table library.

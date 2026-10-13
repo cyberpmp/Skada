@@ -9,8 +9,8 @@ local AuraScanner = Skada.AuraScanner
 local DamageWitness = Skada.DamageWitness
 local GroupObserver = Skada.GroupObserver
 
-local table_getn = table.getn
-local table_remove = table.remove
+local table_getn = SkadaCompat.Table.getn
+local table_remove = SkadaCompat.Table.remove
 local pairs = pairs
 
 Tracking.RememberSpell = SpellRegistry.RememberSpell

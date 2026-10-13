@@ -1,5 +1,6 @@
 local env = _G or getfenv(0)
 local Skada = env.Skada
+local CreateFrame = SkadaCompat.CreateFrame
 
 -- Renderers for the settings dialog's control types. The options schema
 -- (options.schema.lua) stays the data contract: each spec is a leaf of the
@@ -39,9 +40,9 @@ local SkadaCompat = env.SkadaCompat
 local Common = Skada.Common
 local Style = Skada.UIStyle
 
-local table_getn = table.getn
-local table_insert = table.insert
-local table_remove = table.remove
+local table_getn = SkadaCompat.Table.getn
+local table_insert = SkadaCompat.Table.insert
+local table_remove = SkadaCompat.Table.remove
 local floor = math.floor
 local min = math.min
 local max = math.max
@@ -688,6 +689,9 @@ function Color.create(parent)
       Color.refresh(button)
       notifyCommitted(button)
     end
+    -- Claimed before the callbacks are set: a picker that is already open
+    -- is closed first, and must close as the session it belongs to.
+    SkadaCompat.ClaimColorPicker()
     ColorPickerFrame.func = function()
       local pickedRed, pickedGreen, pickedBlue = ColorPickerFrame:GetColorRGB()
       commitValue(spec, pickedRed, pickedGreen, pickedBlue)
@@ -702,11 +706,11 @@ function Color.create(parent)
     ColorPickerFrame:SetColorRGB(previous[1], previous[2], previous[3])
     -- This client doesn't re-derive the shared picker's child layering when
     -- it is raised; the compat layer's OnShow hook carries strata/levels down
-    -- (kept in core.compat.lua for BigDebuffs' picker too), and the level bump
-    -- here puts it above this dialog's deepest frame.
+    -- (the claim closed any open picker, so this Show always fires it) and
+    -- puts the picker's own strata and level back when it closes. The level
+    -- bump here puts it above this dialog's deepest frame.
     ColorPickerFrame:SetFrameStrata("DIALOG")
     ColorPickerFrame:SetFrameLevel((popupRoot:GetFrameLevel() or 0) + 50)
-    SkadaCompat.FixLevels(ColorPickerFrame)
     ColorPickerFrame:Show()
   end)
   return button

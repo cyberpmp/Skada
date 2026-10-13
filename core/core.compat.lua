@@ -1,33 +1,22 @@
--- Fills in globals this 1.12 client doesn't provide, or provides in a broken
--- state, for Skada's own code and for any addon loaded after Skada that
--- needs them (BigDebuffs ships its own Ace3 and leans on the CreateFrame
--- wrapper further down). Every addition is guarded so a client that already
--- provides one of these keeps its real, native implementation untouched --
--- with two deliberate exceptions, noted inline.
+-- Skada's private fixes for this 1.12 client. Nothing here replaces or adds
+-- a global another addon can see: every fix lives on SkadaCompat and
+-- Skada's own files take it as a local (`local table_getn =
+-- SkadaCompat.Table.getn`). Other addons keep exactly the client they would
+-- have without Skada loaded; the one shared frame Skada touches, the color
+-- picker, is only adjusted while Skada itself has it open. The test harness
+-- lints Skada's files for any direct use of the global table library.
+local SkadaCompat = {}
+(_G or getfenv(0)).SkadaCompat = SkadaCompat
 
--- string.match: this client's Lua is 5.1 (the table.getn/setn side-table
--- behaviour handled further down is Lua 5.1's LUA_COMPAT_GETN to the letter),
--- so a native string.match exists -- but addons that load before Skada can
--- clobber it, and one does. RollFor 4.8.1's src\vanilla\backport.lua assigns
--- a pure-Lua string.match built on string.find that returns ONLY the captures
--- and ignores `init`, so every capture-less pattern returns nil for every
--- input. Skada.Common.Match binds string.match at load time, and slash
--- command parsing is a capture-less pattern -- with RollFor enabled (it is,
--- on every character of this install) every /skada command died on "attempt
--- to concatenate a nil value" from the bound match returning
--- nothing. Two earlier fixes shipped and failed because both built on the
--- clobbered function: a `strmatch` global and a wrapper around string.match
--- that rewrote "[A-Za-z]" to "[a-zA-Z]" (RollFor's version returns nil for
--- that pattern in either order). That rewrite came from an in-game bisection
--- blaming the native pattern engine's range handling; since those probes ran
--- with RollFor's clobber in place, the engine theory is unconfirmed and is
--- only applied below if the engine itself demonstrably needs it.
---
--- Probe whatever string.match is installed with the shapes that broke
--- (capture-less match, honoured `init`, multiple captures) and replace it
--- only when the probe fails, so a correct native one stays untouched. The
--- global `strmatch` alias that other addons bind at load time gets
--- the same treatment.
+-- string.match: this client's Lua is 5.1, so a native string.match exists
+-- -- but addons that load before Skada can clobber it, and one does.
+-- RollFor 4.8.1's src\vanilla\backport.lua assigns a pure-Lua string.match
+-- built on string.find that returns ONLY the captures and ignores `init`,
+-- so every capture-less pattern returns nil for every input (every /skada
+-- command died on "attempt to concatenate a nil value"). Probe whatever is
+-- installed with the shapes that broke (capture-less match, honoured
+-- `init`, multiple captures) and keep it only when it passes; Skada
+-- otherwise matches through string.find. The global is left as found.
 local strfind, strsub, gsub = string.find, string.sub, string.gsub
 local function matchViaFind(value, pattern, init)
   local first, last, capture1, capture2, capture3, capture4, capture5,
@@ -47,124 +36,27 @@ local function matchIsCorrect(match)
   return ok and whole == "g-3" and fromInit == "2"
     and settingKey == "width" and settingValue == "700"
 end
-if not matchIsCorrect(string.match) then
-  string.match = matchViaFind
-end
-if not matchIsCorrect(string.match) then
+local match = string.match
+if not matchIsCorrect(match) then match = matchViaFind end
+if not matchIsCorrect(match) then
   -- Even string.find can't match "[A-Za-z]%-[0-9]": the engine really does
   -- mis-parse that range order. "[a-zA-Z]" is the same character set, so the
   -- rewrite is lossless; it costs one gsub per call and only when engaged.
-  local rangeBlindMatch = string.match
-  string.match = function(value, pattern, init)
+  local rangeBlindMatch = match
+  match = function(value, pattern, init)
     return rangeBlindMatch(value, (gsub(pattern, "A%-Za%-z", "a-zA-Z")), init)
   end
 end
-if not matchIsCorrect(strmatch) then strmatch = string.match end
+SkadaCompat.Match = match
 
--- string.split ALREADY EXISTS on this client but is not drop-in compatible
--- with the Blizzard strsplit(delimiters, value [, pieces]) contract the chat
--- command dispatcher (SlashCmdList handlers, strsplit-based addon code)
--- expects: this client's native string.split was confirmed via in-game
--- testing to feed table.concat something other than clean strings ("table
--- contains non-strings") for some inputs. Unlike every other addition in
--- this file, this one is NOT guarded — it deliberately overrides the native,
--- broken implementation with a verified-correct one rather than deferring
--- to it. The earlier replacement dropped empty fields and collapsed runs of
--- delimiters ("a::b" returned only "a" and "b") instead of the standard
--- contract every real string.split follows; this version keeps empty
--- fields, matches delimiter characters literally (no pattern metacharacter
--- can sneak in with the delimiter list, and a non-string value is read as
--- text instead of erroring), and honours the optional `pieces` cap by
--- folding the remainder into the final field. Skada itself never calls it;
--- it exists purely so that other addon code gets the contract it was
--- written against.
-function string.split(delimiters, value, pieces)
-  local fields = {}
-  local fieldCount = 0
-  if value == nil then return unpack(fields) end
-  value = tostring(value)
-  delimiters = delimiters and tostring(delimiters) or ""
-  pieces = tonumber(pieces)
-  local length = string.len(value)
-  local fromIndex = 1
-  while true do
-    -- scan forward to the next delimiter; find(plaintext) instead of a
-    -- character class means "[", "-" and friends in the delimiter list
-    -- cannot corrupt the scan
-    local splitAt = length + 1
-    local index = fromIndex
-    while index <= length do
-      if string.find(delimiters, string.sub(value, index, index), 1, true) then break end
-      index = index + 1
-    end
-    splitAt = index
-    local lastField = pieces and fieldCount + 1 >= pieces and splitAt <= length
-    if lastField then
-      table.insert(fields, string.sub(value, fromIndex))
-    elseif splitAt > length then
-      table.insert(fields, string.sub(value, fromIndex))
-    else
-      table.insert(fields, string.sub(value, fromIndex, splitAt - 1))
-    end
-    fieldCount = fieldCount + 1
-    fromIndex = splitAt + 1
-    if splitAt > length or lastField then break end
-  end
-  return unpack(fields)
-end
-strsplit = string.split
-
-if not string.trim then
-  function string.trim(value)
-    local _, _, trimmed = string.find(value, "^%s*(.-)%s*$")
-    return trimmed
-  end
-end
-if not strtrim then strtrim = string.trim end
-
-if not loadstring and load then loadstring = load end
-if not unpack and table.unpack then unpack = table.unpack end
-if not floor then floor = math.floor end
-if not ceil then ceil = math.ceil end
-if not max then max = math.max end
-if not min then min = math.min end
-if not wipe then
-  function wipe(target)
-    local key
-    for key in pairs(target) do target[key] = nil end
-    return target
-  end
-end
-if not hooksecurefunc then
-  function hooksecurefunc(nameOrTable, nameOrHook, maybeHook)
-    local target, name, hook
-    if type(nameOrTable) == "table" then
-      target, name, hook = nameOrTable, nameOrHook, maybeHook
-    else
-      target, name, hook = _G or getfenv(0), nameOrTable, nameOrHook
-    end
-    local original = target[name]
-    target[name] = function(...)
-      if original then original(...) end
-      return hook(...)
-    end
-  end
-end
-
--- This client's table.getn/insert/remove (like real Lua 5.0's) track an
--- array's length as a side fact separate from its actual contents, rather
--- than deriving it live the way Lua 5.1+'s # operator does. That's fine as
--- long as everything mutates a table through table.insert/remove — but any
--- Lua-5.1-idiomatic code appends via `t[#t+1] = v`, which is invisible to
--- this client's length tracking, so table.remove(t) (no index -> removes at
--- the tracked length) returns nil on entries that were only ever added that
--- way, even though t[1] is clearly non-nil. Confirmed via in-game testing:
--- this broke the settings dialog's tree with "bad argument #1 to 'pairs'
--- (table expected, got nil)" from exactly that pattern. Fixed the same way
--- as string.split above: unconditionally replace all four with self-healing
--- versions that fall back to a real boundary scan whenever the tracked
--- length doesn't match what's actually in the table, instead of trusting a
--- length that native-style mutation could have silently invalidated.
+-- This client's table library (Lua 5.1 with LUA_COMPAT_GETN) tracks an
+-- array's length as a side fact separate from its contents. Anything that
+-- writes a table without going through insert/remove/setn leaves that fact
+-- stale: remove(t) then returns nil on entries that were only ever
+-- assigned, and the native sort and concat read the stale count -- seen in
+-- game as damage windows sorted in scrambled order and concatenations
+-- coming back empty. Skada's arrays go through this private library
+-- instead, which derives every length from the table's actual contents.
 do
   local rawget, rawset = rawget, rawset
   local sizes = setmetatable({}, { __mode = "k" })
@@ -173,18 +65,19 @@ do
     return nil
   end
   -- Every read and write below is raw, as the native C table library's
-  -- are (lua_rawgeti/lua_rawseti in Lua 5.0's ltablib.c): a table with an
-  -- __index metamethod must never see the length probe. Confirmed in game:
-  -- Bagshui's rule environment gives its item table a case-insensitive
-  -- __index that asserts on any miss, and clears that table through
-  -- table.getn -- with a plain t[1] probe here, the length check itself
-  -- tripped the assertion (Rules.lua:765) and every bag came up blank.
-  local function realgetn(t)
+  -- are: a table with an __index metamethod must never see the length
+  -- probe. A cached length that still sits on live content resumes the
+  -- scan from there instead of from index 1, so the `t[getn(t) + 1] = v`
+  -- append stays linear (measured in game: 5000 such appends take 5 ms,
+  -- against 147 ms for the client's own getn).
+  local function getn(t)
     local n = checkint(rawget(t, "n"))
     if n then return n end
-    n = sizes[t]
-    if n and ((n == 0 and rawget(t, 1) == nil)
-        or (n > 0 and rawget(t, n) ~= nil and rawget(t, n + 1) == nil)) then
+    local cached = sizes[t]
+    if cached and (cached == 0 or rawget(t, cached) ~= nil) then
+      n = cached
+      while rawget(t, n + 1) ~= nil do n = n + 1 end
+      if n ~= cached then sizes[t] = n end
       return n
     end
     local i = 1
@@ -192,50 +85,43 @@ do
     sizes[t] = i - 1
     return i - 1
   end
-  -- Records a length insert/remove has just made true. Unlike setn there
-  -- is nothing to truncate, and going through setn would ask realgetn for
-  -- the old length after the content already changed -- a cache miss and a
-  -- full rescan on every call, quadratic over any list built or drained.
+  -- Records a length insert/remove has just made true. Going through setn
+  -- would ask getn for the old length after the content already changed --
+  -- a full rescan on every call, quadratic over any list built or drained.
   local function noteLength(t, n)
     if checkint(rawget(t, "n")) then rawset(t, "n", n) else sizes[t] = n end
   end
+  -- A shrink is a length contract, not a note beside the data: the tail is
+  -- cleared so content and tracked length agree again.
   local function setn(t, n)
     if not checkint(rawget(t, "n")) then
-      -- A shrink is a length contract, not a note beside the data. Lua-5.0
-      -- callers (TurtleMail's recipient autocomplete, for one) do
-      -- table.setn(list, 0) to clear a list, refill it with table.insert,
-      -- then setn-truncate it to a display count while the table still
-      -- physically holds every candidate. Letting the tail survive desyncs
-      -- every later length read -- our rescan answers the physical length
-      -- (stale entries at the front, fresh inserts behind them, popups
-      -- sized from every match on the realm) and the native global getn
-      -- binary-searches the same -- so a shrink nils the tail and content
-      -- and tracked length agree again.
       local i
-      for i = n + 1, realgetn(t) do rawset(t, i, nil) end
+      for i = n + 1, getn(t) do rawset(t, i, nil) end
     end
     noteLength(t, n)
   end
-  table.getn = realgetn
-  table.setn = setn
-  table.insert = function(t, ...)
-    if select("#", ...) <= 1 then
-      local n = realgetn(t)
-      local value = ...
-      rawset(t, n + 1, value)
-      noteLength(t, n + 1)
-    else
-      local pos, value = ...
-      local n = realgetn(t) + 1
-      if pos > n then n = pos end
-      local j
-      for j = n, pos + 1, -1 do rawset(t, j, rawget(t, j - 1)) end
-      rawset(t, pos, value)
-      noteLength(t, n)
-    end
+  -- Fixed parameters, never `...`: this client builds an argument table
+  -- for every vararg call (measured in game: ~125 bytes a call). Without a
+  -- vararg count, one function cannot tell insert(t, pos, nil) from an
+  -- append, so the append and the positional form are two functions. A nil
+  -- value inserts nothing: it could only ever have opened a hole in the list.
+  local function insert(t, value)
+    if value == nil then return end
+    local n = getn(t)
+    rawset(t, n + 1, value)
+    noteLength(t, n + 1)
   end
-  table.remove = function(t, index)
-    local n = realgetn(t)
+  local function insertAt(t, pos, value)
+    if value == nil then return end
+    local n = getn(t) + 1
+    if pos > n then n = pos end
+    local j
+    for j = n, pos + 1, -1 do rawset(t, j, rawget(t, j - 1)) end
+    rawset(t, pos, value)
+    noteLength(t, n)
+  end
+  local function remove(t, index)
+    local n = getn(t)
     if n <= 0 then return end
     index = index or n
     local removed = rawget(t, index)
@@ -246,27 +132,10 @@ do
     return removed
   end
 
-  -- table.sort is a native/C function we cannot patch by reassigning pieces
-  -- of it the way table.getn/insert/remove were above -- confirmed in-game
-  -- to suffer the exact same side-tracked-length problem: the main meter's
-  -- damage/healing windows showed every actor's value computed correctly but
-  -- in scrambled, non-descending order. Every sorted list in Skada is
-  -- rebuilt each cycle via Common.Wipe (which calls table.setn(t, 0) -- now
-  -- our polyfill above, not whatever native mechanism table.sort's C
-  -- implementation actually consults) followed by fresh table.insert calls;
-  -- if table.sort determines "how many elements to sort" from that same
-  -- native side fact rather than live content, it sorts against a stale
-  -- count left over from a *previous*, larger render, comparing real entries
-  -- against nil holes past the real end -- which does not crash (the
-  -- comparator function is never necessarily called against the nil tail for
-  -- small real-element counts) but silently corrupts the ordering of the
-  -- real elements at the front. Use an in-place introsort driven by realgetn.
-  -- The previous last-pivot quicksort took quadratic time and linear stack
-  -- depth on sorted or equal values. This global shim also serves other
-  -- addons, so bound every input to O(n log n) work and O(log n) stack space.
-  -- Raw like the length shim above (native sort uses lua_rawgeti too), and
-  -- bounded like native auxsort: a comparator that is not a strict order
-  -- (`a <= b`, or one that tolerates nil) would otherwise walk the
+  -- The native sort reads the same side-tracked length, so it is replaced
+  -- by an in-place introsort driven by getn: O(n log n) work and O(log n)
+  -- stack on any input. Bounded like the native auxsort, so a comparator
+  -- that is not a strict order (`a <= b`) raises instead of walking the
   -- partition scan off the end of the range forever.
   local function invalidOrder()
     error("invalid order function for sorting", 3)
@@ -341,8 +210,8 @@ do
     end
   end
   local function ascending(a, b) return a < b end
-  table.sort = function(t, comp)
-    local size = realgetn(t)
+  local function sort(t, comp)
+    local size = getn(t)
     if size < 2 then return end
     local depth, remaining = 0, size
     while remaining > 1 do
@@ -352,78 +221,25 @@ do
     introsort(t, comp or ascending, 1, size, depth)
   end
 
-  -- table.concat was left alone above because it doesn't mutate anything --
-  -- but on this client it's built on the exact same side-tracked "n" as
-  -- getn/insert/remove/sort (real Lua 5.0's table library shares one
-  -- length fact across all of them), and every write above now happens
-  -- through this shim's own Lua-level assignments rather than the native
-  -- C insert/setn calls that side-tracked "n" is updated by. So a table
-  -- built via this file's table.insert (used throughout AceOO's Factory
-  -- for its class-identity uid: table.insert into a table, table.sort,
-  -- table.concat to stringify it) carries the right content and the right
-  -- table.getn answer, but the client's native table.concat still reads
-  -- an "n" that was never told about any of it -- confirmed in-game: it
-  -- silently concatenates as empty, which starved AceOO's uid string down
-  -- to "" for every mixin combination, so its Factory handed back
-  -- whichever class happened to be cached under that same empty key
-  -- instead of the right one (seen in game as SuperAPI's FuBarPlugin-based
-  -- minimap button silently missing methods and never showing). Wrap it so
-  -- it always reads the same length this shim already tracks correctly.
-  local realConcat = table.concat
-  table.concat = function(t, sep, i, j)
-    return realConcat(t, sep, i or 1, j or realgetn(t))
+  -- The native concat defaults its end index from the side-tracked length
+  -- too; hand it the real one.
+  local nativeConcat = table.concat
+  local function concat(t, sep, i, j)
+    return nativeConcat(t, sep, i or 1, j or getn(t))
   end
 
-  -- unpack(t) with no explicit end index has the identical exposure: real
-  -- Lua 5.1's unpack defaults its end index from the same native side-
-  -- tracked "n" table.concat did. string.split above (this file's own
-  -- code, bound globally as strsplit for other addons to call too) builds
-  -- its result via this file's table.insert and hands it to a bare
-  -- unpack(pieces) -- the same shape as the table.concat bug, just not yet
-  -- caught in the wild. Same fix.
-  local realUnpack = unpack
-  unpack = function(t, i, j)
-    return realUnpack(t, i or 1, j or realgetn(t))
-  end
-
-  -- table.foreachi(t, f) is the last member of the same Lua-5.0 table
-  -- family (insert/remove/getn/setn/concat/sort/foreachi all read or write
-  -- one shared side-tracked "n" in real Lua 5.0) and nothing else in this
-  -- file has touched it. Real Lua 5.1 dropped it outright, so only patch
-  -- it if this client still carries it for old-addon compatibility; unlike
-  -- concat/unpack it takes no i/j to hand it a bound, so it's replaced
-  -- outright rather than wrapped, same as insert/remove/sort above.
-  if table.foreachi then
-    table.foreachi = function(t, f)
-      local n = realgetn(t)
-      local i
-      for i = 1, n do
-        local result = f(i, rawget(t, i))
-        if result ~= nil then return result end
-      end
-    end
-  end
+  SkadaCompat.Table = {
+    getn = getn,
+    setn = setn,
+    insert = insert,
+    insertAt = insertAt,
+    remove = remove,
+    sort = sort,
+    concat = concat,
+  }
 end
 
--- AceGUI's EditBox/MultiLineEditBox widgets (BigDebuffs' copy)
--- unconditionally hooksecurefunc("ChatEdit_InsertLink", ...) at load time to
--- support shift-clicking chat links into a text field. ChatEdit_InsertLink is a
--- post-Vanilla FrameXML addition and doesn't exist here; the real client's
--- native hooksecurefunc refuses to hook a name that isn't already a
--- function ("target field is not a function"), so give it a harmless
--- no-op stand-in. Link-insertion simply won't do anything on this client,
--- which is fine — Skada's own option widgets don't rely on it.
-if not ChatEdit_InsertLink then function ChatEdit_InsertLink() end end
-
--- Layering helpers, shared with options.lua and the SetParent shim below.
--- Reachable as a global because this file loads before core.common.lua
--- creates the Skada table.
-local SkadaCompat = {}
-(_G or getfenv(0)).SkadaCompat = SkadaCompat
-
--- Sets `strata` on frame and on every frame beneath it. The recursion is
--- the same shape as AceGUI's own fixstrata (AceGUIWidget-DropDown.lua),
--- which its dropdown pullout needs for exactly the reason below.
+-- Sets `strata` on frame and on every frame beneath it.
 function SkadaCompat.ApplyStrata(frame, strata)
   frame:SetFrameStrata(strata)
   local children = { frame:GetChildren() }
@@ -435,8 +251,9 @@ function SkadaCompat.ApplyStrata(frame, strata)
 end
 
 -- Lifts any frame beneath `frame` whose level does not exceed its parent's
--- to parent + 1, all the way down. Larger gaps set on purpose (TreeGroup
--- rows, Skada's own row layers in ui.rows.lua) are left alone.
+-- to parent + 1, all the way down. This client's SetFrameLevel and
+-- SetParent never reach children. Larger gaps set on purpose (Skada's own
+-- row layers in ui.rows.lua) are left alone.
 function SkadaCompat.FixLevels(frame)
   local parentLevel = frame:GetFrameLevel() or 0
   local children = { frame:GetChildren() }
@@ -454,9 +271,7 @@ end
 -- Chains `handler` after whatever script `frame` already has for `name`,
 -- passing on exactly the arguments the client supplied. The client's own
 -- HookScript (added by its DLL) runs the original handler without its
--- positional arguments: seen in game as AceGUI's sizer handler dying on a
--- nil frame, which skipped StopMovingOrSizing and left the settings dialog
--- glued to the mouse. Nothing in Skada may call HookScript (the test
+-- positional arguments, so nothing in Skada may call HookScript (the test
 -- harness lints for it).
 function SkadaCompat.AppendScript(frame, name, handler)
   local previous = frame:GetScript(name)
@@ -466,220 +281,80 @@ function SkadaCompat.AppendScript(frame, name, handler)
   end)
 end
 
--- Re-derives `frame`'s strata and level from `parent` (what a modern client
--- does inside SetParent) and then its whole subtree's.
-function SkadaCompat.InheritLayering(frame, parent)
-  local strata = parent.GetFrameStrata and parent:GetFrameStrata()
-  if strata then SkadaCompat.ApplyStrata(frame, strata) end
-  local parentLevel = parent.GetFrameLevel and parent:GetFrameLevel()
-  if parentLevel and (frame:GetFrameLevel() or 0) <= parentLevel then
-    frame:SetFrameLevel(parentLevel + 1)
+-- Frames for Skada's own UI. GetWidth()/GetHeight() answer from the rect of
+-- the last render pass, so a frame sized by two opposing anchors reads 0
+-- until the next frame -- even right after an explicit SetWidth/SetHeight.
+-- Layout that sizes a child from such a read the moment it is built would
+-- inherit 0, so the explicit size answers while the rect still reads 0;
+-- once rendered, the real rect wins.
+local nativeCreateFrame = CreateFrame
+local function rememberExplicitSize(frame, setterName, getterName, explicitKey)
+  local nativeSetter, nativeGetter = frame[setterName], frame[getterName]
+  if not (nativeSetter and nativeGetter) then return end
+  frame[setterName] = function(self, size)
+    rawset(self, explicitKey, size)
+    return nativeSetter(self, size)
   end
-  SkadaCompat.FixLevels(frame)
+  frame[getterName] = function(self)
+    local rendered = nativeGetter(self)
+    if not rendered or rendered == 0 then return rawget(self, explicitKey) or rendered end
+    return rendered
+  end
 end
 
--- What GetWidth/GetHeight should answer, given the client's raw answer and
--- the explicit size (if any) recorded by the SetWidth/SetHeight wrappers.
--- Two client facts, both from /skada uiprobe output: a frame sized by
--- anchors reads 0 until its first render, and after that it reports its
--- rendered size in SCREEN units (frame units times its effective scale),
--- while an explicitly sized frame reports frame units. At UI scale 0.71 the
--- dialog's 1064-wide content read 757, its 869-wide pane 618 and the
--- 847-wide scroll frame 602. AceGUI's Fill layout feeds such reads straight
--- back into SetWidth, so every rebuild after the first render shrank the
--- settings pane by the UI scale and the controls wrapped into fewer columns
--- with dead space on the right (seen in game, twice). For AceGUI's frames
--- (`.obj` set) an explicit size therefore wins outright, and a rendered
--- rect is divided by the effective scale; every other frame keeps the
--- client's raw answer, with the explicit size only filling in for a rect
--- that still reads 0.
-local function reportedSize(frame, raw, explicitKey)
-  local explicit = rawget(frame, explicitKey)
-  if not frame.obj then
-    if not raw or raw == 0 then return explicit or raw end
-    return raw
-  end
-  if explicit then return explicit end
-  if raw and raw > 0 then
-    local scale = frame.GetEffectiveScale and frame:GetEffectiveScale()
-    if scale and scale > 0 then return raw / scale end
-  end
-  return raw
-end
-
--- CreateFrame itself has real gaps this client leaves open, confirmed via
--- in-game testing. Wrapping CreateFrame (rather than patching every call
--- site) keeps the fixes in one place; they stay generic and .obj-gated so
--- BigDebuffs' own Ace3 dialog keeps benefiting from them too.
-local realCreateFrame = CreateFrame
-function CreateFrame(frameType, name, parent, template, ...)
-  local frame
-  if template == "OptionsListButtonTemplate" then
-    -- Built from scratch below; see 1).
-    frame = realCreateFrame(frameType, name, parent)
-  else
-    frame = realCreateFrame(frameType, name, parent, template, ...)
-  end
+function SkadaCompat.CreateFrame(frameType, name, parent, template)
+  local frame = nativeCreateFrame(frameType, name, parent, template)
   if not frame then return frame end
-
-  -- 0) GetWidth()/GetHeight() answer from the rect of the last render pass,
-  -- so a frame sized by two opposing anchors reads 0 until the next frame --
-  -- even right after an explicit SetWidth/SetHeight. Any layout that sizes
-  -- its child from exactly such a read, synchronously, the moment it is
-  -- built (AceGUI's Fill layout, BigDebuffs' copy included) inherits width 0
-  -- and flows every control into a single column (seen in game). Remember
-  -- explicit sizes and answer with them while the rect is still 0; once
-  -- rendered, the real rect wins -- corrected for the client's screen-unit
-  -- reporting on AceGUI frames, see reportedSize.
-  local realSetWidth, realGetWidth = frame.SetWidth, frame.GetWidth
-  if realSetWidth and realGetWidth then
-    frame.SetWidth = function(self, width)
-      rawset(self, "skadaExplicitWidth", width)
-      return realSetWidth(self, width)
-    end
-    frame.GetWidth = function(self)
-      return reportedSize(self, realGetWidth(self), "skadaExplicitWidth")
-    end
-  end
-  local realSetHeight, realGetHeight = frame.SetHeight, frame.GetHeight
-  if realSetHeight and realGetHeight then
-    frame.SetHeight = function(self, height)
-      rawset(self, "skadaExplicitHeight", height)
-      return realSetHeight(self, height)
-    end
-    frame.GetHeight = function(self)
-      return reportedSize(self, realGetHeight(self), "skadaExplicitHeight")
-    end
-  end
-
-  -- 1) "OptionsListButtonTemplate" (AceGUIContainer-TreeGroup.lua's tree
-  -- sidebar rows -- BigDebuffs' Ace3 copy builds these). This client's
-  -- FrameXML does carry a template by that name
-  -- -- in game the rows came out 18px tall with the gold quest-log highlight
-  -- -- but its OnLoad never populated the `.toggle`/`.text` fields TreeGroup
-  -- indexes (CreateButton crashed on a nil `.toggle`), and what else its XML
-  -- scripts do on this client is unknowable. So the template is bypassed
-  -- above and the row is built here from scratch, identically in game and in
-  -- the test harness: 175x18, the quest-log row highlight (LockHighlight marks
-  -- the selected row with it), the label inset 8px and kept clear of the
-  -- toggle, and the 14x14 expand/collapse toggle at the RIGHT edge (an early
-  -- stand-in anchored it LEFT, over the label's first letter). TreeGroup
-  -- re-anchors `.text`'s LEFT point and swaps the toggle's plus/minus textures
-  -- on every refresh, so only what it never touches is set here.
-  if template == "OptionsListButtonTemplate" then
-    frame:SetWidth(175)
-    frame:SetHeight(18)
-    frame:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
-    local rowHighlight = frame.GetHighlightTexture and frame:GetHighlightTexture()
-    if rowHighlight and rowHighlight.SetBlendMode then rowHighlight:SetBlendMode("ADD") end
-
-    local toggle = realCreateFrame("Button", nil, frame)
-    toggle:SetWidth(14)
-    toggle:SetHeight(14)
-    toggle:SetPoint("RIGHT", frame, "RIGHT", -4, 0)
-    toggle:SetNormalTexture("Interface\\Buttons\\UI-PlusButton-UP")
-    toggle:SetPushedTexture("Interface\\Buttons\\UI-PlusButton-DOWN")
-    toggle:SetHighlightTexture("Interface\\Buttons\\UI-PlusButton-Hilight")
-    local toggleHighlight = toggle.GetHighlightTexture and toggle:GetHighlightTexture()
-    if toggleHighlight and toggleHighlight.SetBlendMode then toggleHighlight:SetBlendMode("ADD") end
-    toggle:Hide()
-    frame.toggle = toggle
-
-    local text = frame:CreateFontString(nil, "BACKGROUND")
-    text:SetFontObject(GameFontNormalSmall)
-    text:SetJustifyH("LEFT")
-    text:SetHeight(18)
-    text:SetPoint("LEFT", frame, "LEFT", 8, 0)
-    text:SetPoint("RIGHT", frame, "RIGHT", -22, 0)
-    frame.text = text
-  end
-
-  -- 1b) SetParent leaves the moved frame's strata and level where they were.
-  -- AceGUI builds every widget under UIParent and only later hands it to its
-  -- container with frame:SetParent(container.content); a modern client then
-  -- re-derives the moved frame's strata and level from the new parent, this
-  -- one does not (1.12-era code such as Dewdrop-2.0 re-applies both by hand
-  -- right after every SetParent for the same reason). Seen in game via
-  -- /skada uiprobe: the dialog root sat at the strata options.lua gives it
-  -- while its reparented TreeGroup, ScrollFrame and every control inside
-  -- kept UIParent's, so the root's own translucent backdrop drew over all of
-  -- them (the "dark tint" across the sidebar and the pane) and, being
-  -- mouse-enabled, took every click meant for them -- GetMouseFocus over a
-  -- sidebar row answered with the unnamed root. Re-derive here on every
-  -- SetParent into an AceGUI frame, subtree included, the way AceGUI's
-  -- dropdown pullout already does for itself with fixlevels/fixstrata.
-  -- AceGUI stamps `.obj` (the owning widget) on every frame it hands out as
-  -- a parent, which keeps this to AceGUI frames (BigDebuffs' copy
-  -- included): this CreateFrame wrapper is global, and addons loading after
-  -- Skada keep the client's own reparenting rules for their frames.
-  local realSetParent = frame.SetParent
-  if realSetParent then
-    frame.SetParent = function(self, parent)
-      realSetParent(self, parent)
-      if type(parent) == "table" and parent.obj then
-        SkadaCompat.InheritLayering(self, parent)
-      end
-    end
-  end
-
-  -- 2) TreeGroup (tree row labels) and Keybinding call
-  -- :SetNormalFontObject(...)/:SetHighlightFontObject(...) on Button frames
-  -- to pick the label's font style (bold top-level rows vs. small indented
-  -- ones); confirmed via in-game testing this client's Button type has
-  -- neither method at all. TreeGroup's row buttons (BigDebuffs' Ace3 copy)
-  -- render their actual visible label through a separately-managed `.text`
-  -- FontString (see the OptionsListButtonTemplate fix above), not the
-  -- button's own native font string, so apply the font there when present;
-  -- fall back to the native GetFontString() otherwise (e.g. Keybinding's
-  -- UIPanelButtonTemplate2 button, which sets its own text via :SetText()).
-  -- Only SetNormalFontObject
-  -- actually applies a font, since every call site here invokes it right
-  -- before SetHighlightFontObject with the display font — a real client only
-  -- swaps to the highlight font while hovered, which we can't track without
-  -- an OnEnter/OnLeave hook; keeping the normal-state font as final is closer
-  -- to correct than always showing the highlight font regardless of hover.
-  if frameType == "Button" then
-    if not frame.SetNormalFontObject then
-      frame.SetNormalFontObject = function(self, fontObject)
-        if type(fontObject) == "string" then
-          fontObject = (_G or getfenv(0))[fontObject] or fontObject
-        end
-        local fontString = self.text or (self.GetFontString and self:GetFontString())
-        if fontString and fontString.SetFontObject then
-          fontString:SetFontObject(fontObject)
-        end
-      end
-    end
-    if not frame.SetHighlightFontObject then
-      frame.SetHighlightFontObject = function() end
-    end
-    if not frame.SetDisabledFontObject then
-      frame.SetDisabledFontObject = function() end
-    end
-  end
-
+  rememberExplicitSize(frame, "SetWidth", "GetWidth", "skadaExplicitWidth")
+  rememberExplicitSize(frame, "SetHeight", "GetHeight", "skadaExplicitHeight")
   return frame
 end
 
--- The Blizzard ColorPickerFrame is shared: Skada's own color control and
--- AceGUI's ColorPicker widget (BigDebuffs' copy) both raise it to
--- FULLSCREEN_DIALOG and bump its level right before showing it. On this
--- client neither change reaches the frame's children -- the Okay and Cancel
--- buttons and the opacity slider keep the DIALOG strata and the levels their
--- XML gave them at load -- so the picker's own translucent backdrop drew
--- over its buttons and its mouse handling swallowed every click on them: it
--- could be opened from the settings but never closed (reported in game).
--- Re-derive the
--- children's layering from the frame every time it shows, the same way, and
--- keep it from re-raising itself over them on click while it is up; the
--- toplevel flag goes back on hide so the frame is left as the default UI
--- and other addons found it.
+-- The Blizzard ColorPickerFrame is shared. When Skada's color control
+-- raises it, the new strata and level never reach its children on this
+-- client -- the Okay and Cancel buttons and the opacity slider stay under
+-- the picker's own backdrop, which swallows every click on them (reported
+-- in game: it could be opened but never closed). Skada claims the picker
+-- before raising it. A picker already open (another addon's session, or
+-- another Skada swatch) is closed first the way its Cancel button closes
+-- it, so that session's cancel callback restores what its live preview
+-- changed; the Show that follows the claim then fires OnShow again. The claim
+-- then records the strata and level of the picker and every frame beneath it.
+-- While
+-- Skada owns the picker its children are re-layered on show and it stops
+-- re-raising itself over them; on hide every recorded frame gets its own
+-- strata and level back, the toplevel flag returns and ownership ends.
+local function recordLayering(frame, records)
+  SkadaCompat.Table.insert(records, { frame = frame, strata = frame:GetFrameStrata(), level = frame:GetFrameLevel() })
+  local children = { frame:GetChildren() }
+  local childIndex = 1
+  while children[childIndex] do
+    recordLayering(children[childIndex], records)
+    childIndex = childIndex + 1
+  end
+end
+
+local colorPickerRecords
+
+function SkadaCompat.ClaimColorPicker()
+  local picker = ColorPickerFrame
+  if not picker then return end
+  if picker:IsShown() then
+    local cancel = picker.cancelFunc
+    picker:Hide()
+    if cancel then cancel(picker.previousValues) end
+  end
+  local records = {}
+  recordLayering(picker, records)
+  colorPickerRecords = records
+end
+
 do
   local picker = ColorPickerFrame
-  local appendScript = SkadaCompat.AppendScript
   if picker and picker.GetChildren then
     local restoreToplevel = false
-    appendScript(picker, "OnShow", function()
+    SkadaCompat.AppendScript(picker, "OnShow", function()
+      if not colorPickerRecords then return end
       SkadaCompat.ApplyStrata(picker, picker:GetFrameStrata())
       SkadaCompat.FixLevels(picker)
       if (not picker.IsToplevel) or picker:IsToplevel() then
@@ -687,7 +362,16 @@ do
         restoreToplevel = true
       end
     end)
-    appendScript(picker, "OnHide", function()
+    SkadaCompat.AppendScript(picker, "OnHide", function()
+      local owned = colorPickerRecords
+      if not owned then return end
+      colorPickerRecords = nil
+      local recordIndex, record
+      for recordIndex = 1, SkadaCompat.Table.getn(owned) do
+        record = owned[recordIndex]
+        if record.strata then record.frame:SetFrameStrata(record.strata) end
+        if record.level then record.frame:SetFrameLevel(record.level) end
+      end
       if restoreToplevel then
         restoreToplevel = false
         picker:SetToplevel(true)

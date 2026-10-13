@@ -1,12 +1,13 @@
 local env = _G or getfenv(0)
 local Skada = env.Skada
+local CreateFrame = SkadaCompat.CreateFrame
 
 local Style = {}
 Skada.UIStyle = Style
 
 local max = math.max
 local min = math.min
-local table_getn = table.getn
+local table_getn = SkadaCompat.Table.getn
 
 local MEDIA = "Interface\\AddOns\\Skada\\media\\"
 

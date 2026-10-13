@@ -81,7 +81,6 @@ saved-fight segments.
 - A native settings panel and draggable minimap button; no Ace or display
   libraries are loaded at runtime.
 - Chat reports to Guild, Party/Raid, Say, or Whisper.
-- Optional client combat-file logging for Chronicle uploads.
 
 ## Installation
 
@@ -108,11 +107,11 @@ saved-fight segments.
 - Drag the header, any bar, the window background, or the lower-right resize
   grip while the window is unlocked.
 
-The gear button opens window actions for settings, combat logging, reporting,
-creating or removing windows, and resetting fight data. Dragged windows can
-snap to screen edges or other visible Skada windows. Snapping and size
-matching are switched per window; the snap distance and gap are one setting
-for every window, under General.
+The gear button opens window actions for settings, reporting, creating or
+removing windows, and resetting fight data. Dragged windows can snap to
+screen edges or other visible Skada windows. Snapping and size matching are
+switched per window; the snap distance and gap are one setting for every
+window, under General.
 
 ### Minimap button
 
@@ -139,8 +138,8 @@ pages for everything that applies to the whole addon, then one entry per
 meter window:
 
 - **General**: how Skada tracks combat (pet merging, tracking outside the
-  group, Nampower events), the minimap button, combat-file logging, and the
-  snap distance and gap every window uses.
+  group, Nampower events), the minimap button, and the snap distance and gap
+  every window uses.
 - **Appearance**: the one look every window shares: window border, bar
   texture, font and number format, bar borders, class and spell colors, and
   the highlight on your own row.
@@ -261,7 +260,7 @@ When reporting a bug, include:
 
 For meter-accuracy reports (wrong damage, healing, or threat numbers), describe
 the encounter and attach the matching window of `Logs/WoWCombatLog.txt` if you
-have combat logging enabled — it is the ground truth the parser can be checked
+have `/combatlog` enabled — it is the ground truth the parser can be checked
 against.
 
 Contributions are welcome via pull requests against `main`. Please run the

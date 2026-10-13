@@ -449,3 +449,22 @@ def run(ctx: Context):
       assert(primary.db.segment == "current")
       assert(Skada.Modes:Set("damage", primary))
     ''')
+
+    ctx.run(r'''
+      -- The estimate follows the window holding the threat meter, on any of
+      -- its pages: stepping back to the mode list and forward again keeps
+      -- what was built, switching the meter away drops it.
+      local primary = Skada.UI:GetPrimary()
+      local estimator = Skada.ThreatEstimate
+      assert(Skada.Modes:Set("threat", primary))
+      assert(estimator.wanted, "switching a window to threat did not start the estimate at once")
+      estimator.enemyCount = 1
+      primary:Back()
+      Skada.Threat:Update(GetTime())
+      assert(estimator.wanted and estimator.enemyCount == 1,
+        "stepping back to the mode list dropped the threat estimate")
+      primary:Forward()
+      assert(Skada.Modes:Set("damage", primary))
+      assert(not estimator.wanted and estimator.enemyCount == 0,
+        "switching the meter away kept the threat estimate")
+    ''')

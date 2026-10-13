@@ -6,8 +6,8 @@ Skada.DataAggregator = DataAggregator
 local min = math.min
 local max = math.max
 local floor = math.floor
-local table_getn = table.getn
-local table_insert = table.insert
+local table_getn = SkadaCompat.Table.getn
+local table_insert = SkadaCompat.Table.insert
 
 function DataAggregator:NewSet(name, now, isTotal)
   return {

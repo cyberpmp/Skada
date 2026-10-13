@@ -2,6 +2,109 @@
 
 All notable changes to the PMP Skada rewrite are documented here.
 
+## 3.1.0 - 2026-10-13
+
+### Changed
+
+- Skada no longer changes anything other addons share. It used to
+  replace the global `table.getn`/`setn`/`insert`/`remove`/`sort`/
+  `concat`, `unpack` and `CreateFrame`, rewrite `string.match` and
+  `string.split`, and add `strsplit`, `strtrim`, `wipe` and other
+  globals, so every addon in the UI ran its table code through Skada's
+  Lua — measured in game, a `table.insert` cost 11 times the native
+  price and made about 125 bytes of garbage per call, for every addon,
+  all fight. Those fixes are private now (`SkadaCompat`), taken as
+  locals by Skada's own files only; every addon sees the client exactly
+  as it would without Skada. The boot suite fails if Skada changes a
+  shared library member or API global, and a lint fails any Skada file
+  that calls the shared table library. Skada's private length tracking
+  also resumes from the remembered length and takes fixed parameters,
+  so building a list costs a fraction of the client's own (5000
+  appends: 5 ms against 147 ms).
+- Skada no longer writes Nampower's CVars. On Nampower 4.5 and later,
+  registering for an event is what turns it on; an older build is read
+  only when its event CVars are already on, and otherwise Skada stays on
+  chat text and `/skada status` names the CVar that is off. A CVar turned
+  on later is picked up when the next pull starts. A version Skada cannot
+  read counts as a current build.
+- The shared color picker is only re-layered while Skada's own color
+  control has it open, and gets its strata, level and toplevel flag back
+  when it closes. A picker another addon left open is closed through its
+  own cancel callback first.
+
+### Fixed
+
+- Live-but-quiet window families repaint at most once per second now.
+  Mode summaries, fight durations, uptime meters and threat estimates
+  were re-checked on every 250 ms display tick and rebuilt all four —
+  every label they display is clock- or ticker-driven at one-second
+  resolution. Clock-driven windows are re-checked once a second from the
+  wall clock, and a data change still repaints immediately through the
+  dirty flag. One build consumes the clock-gate's window too: a
+  data-driven repaint can no longer be followed by another one 250 ms
+  later because the dirty path used the previous check's slot.
+- The per-second boss poll stops re-querying the creature API for units
+  it has already resolved. During a pull the poll probed ~40 group and
+  pet targets a second and hit `C_CreatureInfo` for a resolved unit's
+  raw ID and info on every pass — both calls now answer from per-GUID
+  and per-ID caches (cleared past 2048 entries), so a second poll of the
+  same pull costs no creature-API calls at all. A GUID without a creature
+  ID is not probed again, creature info the client has not loaded yet is
+  asked again next poll, and a BigWigs encounter list that fails to build
+  is retried after 30 seconds (or at once when BigWigs loads), not on
+  every poll. These caches and Nampower's name, summon and dropped-source
+  caches share one bounded-map helper.
+- The threat estimate only runs while a threat window is on screen. In a
+  raid every hit, heal and spell-go fed it, and each heal probed the
+  target and swept every enemy, whether or not any window showed threat.
+  It keeps running while a window's meter is threat on any of its pages,
+  so stepping back to the mode list and forward again loses nothing.
+  Hiding the last threat window or switching it to another meter drops
+  what the estimate gathered, so one shown again mid-pull estimates from
+  that point on.
+- Pet churn no longer rebuilds the roster on the spot. Every `UNIT_PET`
+  — warlock and hunter pets come and go all fight — rebuilt the whole
+  roster, flushed the name and summon caches and requeued the group's
+  aura baseline. Only group members' pets count now (raid tokens only
+  while in a raid). A pet summoned onto an empty pet token is added on its
+  own at once, so its first hits are credited; dismissals, deaths and
+  swaps fold into one rebuild on the next data tick.
+- An uncredited damage source is described at most once per 30 seconds.
+  The `/skada status` diagnostic probed the source's owner and built a
+  fresh description for every dropped packet — every AoE tick on a
+  totem and every hit by units outside the group. Nampower spell-damage
+  packets also stop allocating a table to read their mitigation.
+- With Nampower active, chat combat lines whose facts Nampower already
+  supplies are no longer pattern-matched. Every combat line was still run
+  through the parser and its result thrown away — thousands of lines a
+  second in a raid. A route now tries only the patterns whose fact is
+  live: most combat routes return at once, and the spell-damage routes
+  keep only their interrupt patterns. A line a Nampower-supplied pattern
+  would have claimed is still dropped, never passed to a broader pattern
+  that would record it as something else.
+
+### Removed
+
+- Leftover Ace3 code in the compatibility layer, unused since the
+  settings dialog dropped Ace3 in 2.0.0: the widget fixes (`SetParent`
+  layering, the `OptionsListButtonTemplate` rebuild, font-object stubs),
+  the `ChatEdit_InsertLink` stub and the `strsplit` replacement.
+- The combat-file logging toggle (General page and the gear menu). It
+  only switched the client's own `/combatlog`; raid-log uploaders such
+  as Chronicle write their own files through their companion addon. Use
+  `/combatlog` directly if you want the client log. Saved profiles drop
+  the old flag.
+
+### Added
+
+- A `budget_scans` suite locks the above contracts: a retarget in combat
+  still scans the target silently on the spot, live-but-quiet families
+  hold the once-per-second cadence with immediate dirty rebuilds, the
+  boss poll probes each target's creature ID once and keeps its info
+  across collections, the private getn stays linear, pet churn folds
+  into one roster rebuild per tick, and a dropped source is described
+  once per window.
+
 ## 3.0.2 - 2026-10-05
 
 ### Fixed

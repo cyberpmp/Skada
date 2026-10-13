@@ -9,9 +9,9 @@ local wipeTable = Common.Wipe
 local pairs = pairs
 local min = math.min
 local max = math.max
-local table_getn = table.getn
-local table_insert = table.insert
-local table_remove = table.remove
+local table_getn = SkadaCompat.Table.getn
+local table_insert = SkadaCompat.Table.insert
+local table_remove = SkadaCompat.Table.remove
 
 function AuraScanner:QueueAuraBaseline(unit, unknownOnly, now)
   if not self.auraAPI or not unit or not UnitExists(unit) then return end

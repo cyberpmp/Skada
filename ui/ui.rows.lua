@@ -1,4 +1,5 @@
 local Skada = (_G or getfenv(0)).Skada
+local CreateFrame = SkadaCompat.CreateFrame
 
 local Renderer = {}
 Skada.UIRowRenderer = Renderer
@@ -16,7 +17,7 @@ local abs = math.abs
 local floor = math.floor
 local max = math.max
 local min = math.min
-local table_getn = table.getn
+local table_getn = SkadaCompat.Table.getn
 
 -- Anchor names the window frame's SetPoint accepts; anything else in the
 -- stored geometry (a nil read by PersistGeometry on the vanilla client,

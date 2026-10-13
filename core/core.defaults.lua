@@ -13,7 +13,6 @@ Defaults.schema = {
     useNampower = true,
     maxSegments = 10,
     onlyBossFights = false,
-    autoLog = false,
     resetOnEnterInstance = "ask",
     resetOnJoinGroup = "ask",
     resetOnLeaveGroup = "ask",

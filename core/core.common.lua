@@ -1,5 +1,6 @@
 local env = _G or getfenv(0)
 local Skada = env.Skada
+local CreateFrame = SkadaCompat.CreateFrame
 if not Skada then
   Skada = {}
   env.Skada = Skada
@@ -12,33 +13,47 @@ local pairs = pairs
 local type = type
 local string_byte = string.byte
 local string_gsub = string.gsub
+local table_setn = SkadaCompat.Table.setn
 
-string.gmatch = string.gmatch or string.gfind
-string.gfind = string.gfind or string.gmatch
-
-if not string.match then
-
-  local string_find = string.find
-  local string_sub = string.sub
-  function string.match(text, pattern, init)
-    local start, stop, first, second, third, fourth, fifth = string_find(text, pattern, init)
-    if not start then return nil end
-    if first == nil then return string_sub(text, start, stop) end
-    return first, second, third, fourth, fifth
-  end
-end
-
-local string_match = string.match
-Common.Match = string_match
+Common.Match = SkadaCompat.Match
+Common.GMatch = string.gmatch or string.gfind
 
 function Common.Wipe(targetTable)
-  if table.wipe then
-    table.wipe(targetTable)
-  else
-    local key
-    for key in pairs(targetTable) do targetTable[key] = nil end
+  local key
+  for key in pairs(targetTable) do targetTable[key] = nil end
+  table_setn(targetTable, 0)
+end
+
+-- A cache keyed by GUID or ID that is dropped wholesale once it holds
+-- `limit` keys, so hours of churning units cannot pile up; a drop only costs
+-- the next lookup of each key still in use. Hot paths read `map.entries`
+-- directly; every write goes through Set so the count stays true.
+local BoundedMap = {}
+BoundedMap.__index = BoundedMap
+
+function Common.NewBoundedMap(limit)
+  return setmetatable({ entries = {}, count = 0, limit = limit }, BoundedMap)
+end
+
+function BoundedMap:Set(key, value)
+  local entries = self.entries
+  if entries[key] == nil then
+    if value == nil then return end
+    if self.count >= self.limit then
+      entries = {}
+      self.entries = entries
+      self.count = 0
+    end
+    self.count = self.count + 1
+  elseif value == nil then
+    self.count = self.count - 1
   end
-  if table.setn then table.setn(targetTable, 0) end
+  entries[key] = value
+end
+
+function BoundedMap:Clear()
+  self.entries = {}
+  self.count = 0
 end
 
 function Common.Trim(value)

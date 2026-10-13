@@ -281,4 +281,7 @@ end
 
 Skada:RegisterInitializer(function() Data:Initialize() end, "data")
 
-Skada:RegisterTicker("data", 0.20, function(now) Data:Update(now) end)
+Skada:RegisterTicker("data", 0.20, function(now)
+  if Data.rosterRebuildPending then Data:RebuildRoster() end
+  Data:Update(now)
+end)

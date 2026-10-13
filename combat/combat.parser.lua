@@ -1,27 +1,37 @@
 local Skada = (_G or getfenv(0)).Skada
 
--- suppressedFacts gates the record helpers below. combat.nampower.lua sets the
--- entries it takes over so the same hit is never counted from both the server
--- packet and the localized chat line. Routes with no Nampower equivalent
--- (interrupts, crowd control, aura removal) are never suppressed.
+local type = type
+local tonumber = tonumber
+local table_getn = SkadaCompat.Table.getn
+local table_insert = SkadaCompat.Table.insert
+local string_sub = string.sub
+local string_find = string.find
+local string_len = string.len
+
+-- suppressedFacts lists the facts combat.nampower.lua takes over, so the same
+-- hit is never counted from both the server packet and the localized chat
+-- line. Routes with no Nampower equivalent (interrupts, crowd control, aura
+-- removal) are never suppressed.
+--
+-- Every pattern is tagged with the fact its handler records, and a route only
+-- tries the patterns whose fact is live. With Nampower active most combat
+-- routes have nothing live at all and return before any pattern runs: in a
+-- raid that is thousands of lines a second matched only to be thrown away.
+-- RefreshActiveEntries is the one gate: no suppressed handler is ever
+-- called, and the record helpers never check suppression themselves.
 local Parser = { routes = {}, unmatchedCountByEvent = {}, suppressedFacts = {} }
+local suppressedFacts = Parser.suppressedFacts
 Skada.Parser = Parser
 
 function Parser:SuppressFact(fact, suppressed)
-  self.suppressedFacts[fact] = suppressed and true or nil
+  suppressedFacts[fact] = suppressed and true or nil
+  local eventName, route
+  for eventName, route in pairs(self.routes) do route.activeEntries = nil end
 end
 
 function Parser:IsFactSuppressed(fact)
   return self.suppressedFacts[fact] and true or false
 end
-
-local type = type
-local tonumber = tonumber
-local table_getn = table.getn
-local table_insert = table.insert
-local string_sub = string.sub
-local string_find = string.find
-local string_len = string.len
 
 local mitigationType, mitigationAmount
 
@@ -116,7 +126,8 @@ local function captureAt(index, first, second, third, fourth, fifth)
   if index == 5 then return fifth end
 end
 
-function Parser:AddPattern(events, format, handler, critical, key)
+-- fact names what the handler records; it is what SuppressFact turns off.
+function Parser:AddPattern(fact, events, format, handler, critical, key)
   if type(format) ~= "string" or format == "" then return end
   local pattern, positions, sampleMessage, captureCount = compileCombatFormat(format)
   local directCaptures = true
@@ -135,6 +146,7 @@ function Parser:AddPattern(events, format, handler, critical, key)
     critical = critical and true or false,
     key = key or format,
     directCaptures = directCaptures,
+    fact = fact,
   }
 
   local eventIndex, eventName, route
@@ -157,11 +169,14 @@ function Parser:AddPattern(events, format, handler, critical, key)
     end
     route.priorityEntriesByEntry[entry] = priorityEntries
     table_insert(route, entry)
+    -- A route that has already handled a line holds a live list without
+    -- this pattern; the next line rebuilds it.
+    route.activeEntries = nil
   end
 end
 
-function Parser:AddGlobal(events, globalName, handler)
-  self:AddPattern(events, _G[globalName], handler, string_find(globalName, "CRIT") ~= nil, globalName)
+function Parser:AddGlobal(fact, events, globalName, handler)
+  self:AddPattern(fact, events, _G[globalName], handler, string_find(globalName, "CRIT") ~= nil, globalName)
 end
 
 -- The 1.12 client prints an empty name for a unit it cannot see ("'s Inferno
@@ -194,16 +209,89 @@ local mitigationTrailers = {
   { pattern = " %(crushing%)$", trailerType = "crushing" },
 }
 
+local MITIGATION_TRAILER_COUNT = table_getn(mitigationTrailers)
+
+-- Rebuilds a route's live pattern list after a suppression change. A route
+-- that is partly suppressed stops counting misses: lines for its suppressed
+-- facts now go unmatched by design. Only live patterns are tried, but a line
+-- still belongs to the first pattern in route order that matches it: each
+-- live pattern keeps the suppressed ones ahead of it as claimers, checked
+-- only once it has matched, and a line a claimer also matches is dropped
+-- rather than recorded under the wrong fact. The match cache's priority
+-- lists are narrowed to live patterns the same way. Only damage records the
+-- mitigation trailer, so a route with no live damage pattern skips the strip.
+function Parser:RefreshActiveEntries(route)
+  local activeEntries = {}
+  local livePriorityByEntry = {}
+  local claimersByEntry
+  local suppressedAhead = {}
+  local activeCount, needsTrailers, suppressedCount = 0, false, 0
+  local entryIndex, entry, priorityEntries, livePriority, priorityIndex, claimerIndex
+  for entryIndex = 1, table_getn(route) do
+    entry = route[entryIndex]
+    if suppressedFacts[entry.fact] then
+      suppressedCount = suppressedCount + 1
+      suppressedAhead[suppressedCount] = entry
+    else
+      activeCount = activeCount + 1
+      activeEntries[activeCount] = entry
+      if entry.fact == nil or entry.fact == "damage" then needsTrailers = true end
+
+      priorityEntries = route.priorityEntriesByEntry[entry]
+      livePriority = {}
+      for priorityIndex = 1, table_getn(priorityEntries) do
+        if not suppressedFacts[priorityEntries[priorityIndex].fact] then
+          table_insert(livePriority, priorityEntries[priorityIndex])
+        end
+      end
+      livePriorityByEntry[entry] = livePriority
+
+      if suppressedCount > 0 then
+        claimersByEntry = claimersByEntry or {}
+        local claimers = {}
+        for claimerIndex = 1, suppressedCount do claimers[claimerIndex] = suppressedAhead[claimerIndex] end
+        claimersByEntry[entry] = claimers
+      end
+    end
+  end
+  route.activeEntries = activeEntries
+  route.activeCount = activeCount
+  route.livePriorityByEntry = livePriorityByEntry
+  route.claimersByEntry = claimersByEntry
+  route.needsTrailers = needsTrailers
+  route.countsMisses = suppressedCount == 0
+  route.lastMatchedEntry = nil
+  return activeEntries
+end
+
+-- Hands a matched line to its pattern's handler, unless a suppressed
+-- pattern ahead of it on the route claims the line. Fixed parameters: this
+-- runs once per matched combat line.
+local function dispatch(route, entry, message, first, second, third, fourth, fifth)
+  local claimersByEntry = route.claimersByEntry
+  local claimers = claimersByEntry and claimersByEntry[entry]
+  if claimers then
+    local claimerIndex
+    for claimerIndex = 1, table_getn(claimers) do
+      if string_find(message, claimers[claimerIndex].pattern) then return end
+    end
+  end
+  entry.handler(entry, first, second, third, fourth, fifth)
+end
+
 function Parser:OnCombatMessage(eventName, message)
   if type(message) ~= "string" then return end
   local route = self.routes[eventName]
   if not route then return end
+  local activeEntries = route.activeEntries or self:RefreshActiveEntries(route)
+  local activeCount = route.activeCount
+  if activeCount == 0 then return end
 
   mitigationType, mitigationAmount = nil, nil
 
-  if string_sub(message, -1) == ")" then
+  if route.needsTrailers and string_sub(message, -1) == ")" then
     local trailerIndex
-    for trailerIndex = 1, table_getn(mitigationTrailers) do
+    for trailerIndex = 1, MITIGATION_TRAILER_COUNT do
       local trailer = mitigationTrailers[trailerIndex]
       local start, _, amount = string_find(message, trailer.pattern)
       if start then
@@ -221,36 +309,38 @@ function Parser:OnCombatMessage(eventName, message)
     matched, first, second, third, fourth, fifth = self:Match(cachedEntry, message)
     if matched then
       local cachedFirst, cachedSecond, cachedThird, cachedFourth, cachedFifth = first, second, third, fourth, fifth
-      local priorityEntries = route.priorityEntriesByEntry and route.priorityEntriesByEntry[cachedEntry] or {}
+      local priorityEntries = route.livePriorityByEntry[cachedEntry]
       local priorityIndex, priorityEntry
       for priorityIndex = 1, table_getn(priorityEntries) do
         priorityEntry = priorityEntries[priorityIndex]
         matched, first, second, third, fourth, fifth = self:Match(priorityEntry, message)
         if matched then
           route.lastMatchedEntry = priorityEntry
-          priorityEntry.handler(priorityEntry, first, second, third, fourth, fifth)
+          dispatch(route, priorityEntry, message, first, second, third, fourth, fifth)
           return true
         end
       end
-      cachedEntry.handler(cachedEntry, cachedFirst, cachedSecond, cachedThird, cachedFourth, cachedFifth)
+      dispatch(route, cachedEntry, message, cachedFirst, cachedSecond, cachedThird, cachedFourth, cachedFifth)
       return true
     end
   end
 
   local formatEntry, formatIndex
-  for formatIndex = 1, table_getn(route) do
-    formatEntry = route[formatIndex]
+  for formatIndex = 1, activeCount do
+    formatEntry = activeEntries[formatIndex]
     if formatEntry ~= cachedEntry then
       matched, first, second, third, fourth, fifth = self:Match(formatEntry, message)
       if matched then
         route.lastMatchedEntry = formatEntry
-        formatEntry.handler(formatEntry, first, second, third, fourth, fifth)
+        dispatch(route, formatEntry, message, first, second, third, fourth, fifth)
         return true
       end
     end
   end
   route.lastMatchedEntry = nil
-  self.unmatchedCountByEvent[eventName] = (self.unmatchedCountByEvent[eventName] or 0) + 1
+  if route.countsMisses then
+    self.unmatchedCountByEvent[eventName] = (self.unmatchedCountByEvent[eventName] or 0) + 1
+  end
 end
 
 local function getPlayerName()
@@ -261,28 +351,23 @@ local function resolveSpellID(sourceName, spellName)
   return Skada.Tracking and Skada.Tracking:GetSpellID(sourceName, spellName) or nil
 end
 
-local suppressedFacts = Parser.suppressedFacts
 
 local function recordDamage(sourceName, spellName, targetName, amount, school, critical)
-  if suppressedFacts.damage then return end
   Skada.Data:RecordDamage(sourceName, targetName, amount, spellName, resolveSpellID(sourceName, spellName),
     school or "Physical", critical, GetTime(), mitigationType, mitigationAmount)
 end
 
 local function recordHealing(sourceName, spellName, targetName, amount, critical)
-  if suppressedFacts.healing then return end
   Skada.Data:RecordHealing(sourceName, targetName, amount, spellName,
     resolveSpellID(sourceName, spellName), critical, GetTime())
 end
 
 local function recordPower(recipientName, sourceName, amount, powerType, spellName)
-  if suppressedFacts.power then return end
   Skada.Data:RecordPower(recipientName, sourceName, amount, powerType, spellName,
     resolveSpellID(sourceName, spellName), GetTime())
 end
 
 local function recordAvoidance(sourceName, spellName, targetName, avoidanceType)
-  if suppressedFacts.avoidance then return end
   Skada.Data:RecordMiss(sourceName, targetName, spellName, avoidanceType, GetTime())
 end
 
@@ -391,48 +476,48 @@ local periodicOtherEvents = {
   "CHAT_MSG_SPELL_PERIODIC_FRIENDLYPLAYER_DAMAGE", "CHAT_MSG_SPELL_PERIODIC_CREATURE_DAMAGE",
 }
 
-Parser:AddGlobal(selfHitEvents, "COMBATHITSELFOTHER", autoSelfOther)
-Parser:AddGlobal(selfHitEvents, "COMBATHITSCHOOLSELFOTHER", autoSelfOther)
-Parser:AddGlobal(selfHitEvents, "COMBATHITCRITSELFOTHER", autoSelfOther)
-Parser:AddGlobal(selfHitEvents, "COMBATHITCRITSCHOOLSELFOTHER", autoSelfOther)
+Parser:AddGlobal("damage", selfHitEvents, "COMBATHITSELFOTHER", autoSelfOther)
+Parser:AddGlobal("damage", selfHitEvents, "COMBATHITSCHOOLSELFOTHER", autoSelfOther)
+Parser:AddGlobal("damage", selfHitEvents, "COMBATHITCRITSELFOTHER", autoSelfOther)
+Parser:AddGlobal("damage", selfHitEvents, "COMBATHITCRITSCHOOLSELFOTHER", autoSelfOther)
 
-Parser:AddGlobal(otherSelfHitEvents, "COMBATHITOTHERSELF", autoOtherSelf)
-Parser:AddGlobal(otherSelfHitEvents, "COMBATHITSCHOOLOTHERSELF", autoOtherSelf)
-Parser:AddGlobal(otherSelfHitEvents, "COMBATHITCRITOTHERSELF", autoOtherSelf)
-Parser:AddGlobal(otherSelfHitEvents, "COMBATHITCRITSCHOOLOTHERSELF", autoOtherSelf)
+Parser:AddGlobal("damage", otherSelfHitEvents, "COMBATHITOTHERSELF", autoOtherSelf)
+Parser:AddGlobal("damage", otherSelfHitEvents, "COMBATHITSCHOOLOTHERSELF", autoOtherSelf)
+Parser:AddGlobal("damage", otherSelfHitEvents, "COMBATHITCRITOTHERSELF", autoOtherSelf)
+Parser:AddGlobal("damage", otherSelfHitEvents, "COMBATHITCRITSCHOOLOTHERSELF", autoOtherSelf)
 
-Parser:AddGlobal(otherOtherHitEvents, "COMBATHITOTHEROTHER", autoOtherOther)
-Parser:AddGlobal(otherOtherHitEvents, "COMBATHITSCHOOLOTHEROTHER", autoOtherOther)
-Parser:AddGlobal(otherOtherHitEvents, "COMBATHITCRITOTHEROTHER", autoOtherOther)
-Parser:AddGlobal(otherOtherHitEvents, "COMBATHITCRITSCHOOLOTHEROTHER", autoOtherOther)
+Parser:AddGlobal("damage", otherOtherHitEvents, "COMBATHITOTHEROTHER", autoOtherOther)
+Parser:AddGlobal("damage", otherOtherHitEvents, "COMBATHITSCHOOLOTHEROTHER", autoOtherOther)
+Parser:AddGlobal("damage", otherOtherHitEvents, "COMBATHITCRITOTHEROTHER", autoOtherOther)
+Parser:AddGlobal("damage", otherOtherHitEvents, "COMBATHITCRITSCHOOLOTHEROTHER", autoOtherOther)
 
-Parser:AddGlobal(selfSpellEvents, "SPELLLOGSCHOOLSELFSELF", spellSchoolSelfSelf)
-Parser:AddGlobal(selfSpellEvents, "SPELLLOGCRITSCHOOLSELFSELF", spellSchoolSelfSelf)
-Parser:AddGlobal(selfSpellEvents, "SPELLLOGSELFSELF", spellSelfSelf)
-Parser:AddGlobal(selfSpellEvents, "SPELLLOGCRITSELFSELF", spellSelfSelf)
-Parser:AddGlobal(selfSpellEvents, "SPELLLOGSCHOOLSELFOTHER", spellSchoolSelfOther)
-Parser:AddGlobal(selfSpellEvents, "SPELLLOGCRITSCHOOLSELFOTHER", spellSchoolSelfOther)
-Parser:AddGlobal(selfSpellEvents, "SPELLLOGSELFOTHER", spellSelfOther)
-Parser:AddGlobal(selfSpellEvents, "SPELLLOGCRITSELFOTHER", spellSelfOther)
+Parser:AddGlobal("damage", selfSpellEvents, "SPELLLOGSCHOOLSELFSELF", spellSchoolSelfSelf)
+Parser:AddGlobal("damage", selfSpellEvents, "SPELLLOGCRITSCHOOLSELFSELF", spellSchoolSelfSelf)
+Parser:AddGlobal("damage", selfSpellEvents, "SPELLLOGSELFSELF", spellSelfSelf)
+Parser:AddGlobal("damage", selfSpellEvents, "SPELLLOGCRITSELFSELF", spellSelfSelf)
+Parser:AddGlobal("damage", selfSpellEvents, "SPELLLOGSCHOOLSELFOTHER", spellSchoolSelfOther)
+Parser:AddGlobal("damage", selfSpellEvents, "SPELLLOGCRITSCHOOLSELFOTHER", spellSchoolSelfOther)
+Parser:AddGlobal("damage", selfSpellEvents, "SPELLLOGSELFOTHER", spellSelfOther)
+Parser:AddGlobal("damage", selfSpellEvents, "SPELLLOGCRITSELFOTHER", spellSelfOther)
 
-Parser:AddGlobal(otherSelfSpellEvents, "SPELLLOGSCHOOLOTHERSELF", spellSchoolOtherSelf)
-Parser:AddGlobal(otherSelfSpellEvents, "SPELLLOGCRITSCHOOLOTHERSELF", spellSchoolOtherSelf)
-Parser:AddGlobal(otherSelfSpellEvents, "SPELLLOGOTHERSELF", spellOtherSelf)
-Parser:AddGlobal(otherSelfSpellEvents, "SPELLLOGCRITOTHERSELF", spellOtherSelf)
+Parser:AddGlobal("damage", otherSelfSpellEvents, "SPELLLOGSCHOOLOTHERSELF", spellSchoolOtherSelf)
+Parser:AddGlobal("damage", otherSelfSpellEvents, "SPELLLOGCRITSCHOOLOTHERSELF", spellSchoolOtherSelf)
+Parser:AddGlobal("damage", otherSelfSpellEvents, "SPELLLOGOTHERSELF", spellOtherSelf)
+Parser:AddGlobal("damage", otherSelfSpellEvents, "SPELLLOGCRITOTHERSELF", spellOtherSelf)
 
-Parser:AddGlobal(otherOtherSpellEvents, "SPELLLOGSCHOOLOTHEROTHER", spellSchoolOtherOther)
-Parser:AddGlobal(otherOtherSpellEvents, "SPELLLOGCRITSCHOOLOTHEROTHER", spellSchoolOtherOther)
-Parser:AddGlobal(otherOtherSpellEvents, "SPELLLOGOTHEROTHER", spellOtherOther)
-Parser:AddGlobal(otherOtherSpellEvents, "SPELLLOGCRITOTHEROTHER", spellOtherOther)
+Parser:AddGlobal("damage", otherOtherSpellEvents, "SPELLLOGSCHOOLOTHEROTHER", spellSchoolOtherOther)
+Parser:AddGlobal("damage", otherOtherSpellEvents, "SPELLLOGCRITSCHOOLOTHEROTHER", spellSchoolOtherOther)
+Parser:AddGlobal("damage", otherOtherSpellEvents, "SPELLLOGOTHEROTHER", spellOtherOther)
+Parser:AddGlobal("damage", otherOtherSpellEvents, "SPELLLOGCRITOTHEROTHER", spellOtherOther)
 
-Parser:AddGlobal({ "CHAT_MSG_SPELL_DAMAGESHIELDS_ON_SELF" }, "DAMAGESHIELDSELFOTHER", shieldSelfOther)
-Parser:AddGlobal({ "CHAT_MSG_SPELL_DAMAGESHIELDS_ON_OTHERS" }, "DAMAGESHIELDOTHERSELF", shieldOtherSelf)
-Parser:AddGlobal({ "CHAT_MSG_SPELL_DAMAGESHIELDS_ON_OTHERS" }, "DAMAGESHIELDOTHEROTHER", shieldOtherOther)
+Parser:AddGlobal("damage", { "CHAT_MSG_SPELL_DAMAGESHIELDS_ON_SELF" }, "DAMAGESHIELDSELFOTHER", shieldSelfOther)
+Parser:AddGlobal("damage", { "CHAT_MSG_SPELL_DAMAGESHIELDS_ON_OTHERS" }, "DAMAGESHIELDOTHERSELF", shieldOtherSelf)
+Parser:AddGlobal("damage", { "CHAT_MSG_SPELL_DAMAGESHIELDS_ON_OTHERS" }, "DAMAGESHIELDOTHEROTHER", shieldOtherOther)
 
-Parser:AddGlobal(periodicOtherEvents, "PERIODICAURADAMAGESELFOTHER", periodicSelfOther)
-Parser:AddGlobal(periodicOtherEvents, "PERIODICAURADAMAGEOTHEROTHER", periodicOtherOther)
-Parser:AddGlobal({ "CHAT_MSG_SPELL_PERIODIC_SELF_DAMAGE" }, "PERIODICAURADAMAGESELFSELF", periodicSelfSelf)
-Parser:AddGlobal({ "CHAT_MSG_SPELL_PERIODIC_SELF_DAMAGE" }, "PERIODICAURADAMAGEOTHERSELF", periodicOtherSelf)
+Parser:AddGlobal("damage", periodicOtherEvents, "PERIODICAURADAMAGESELFOTHER", periodicSelfOther)
+Parser:AddGlobal("damage", periodicOtherEvents, "PERIODICAURADAMAGEOTHEROTHER", periodicOtherOther)
+Parser:AddGlobal("damage", { "CHAT_MSG_SPELL_PERIODIC_SELF_DAMAGE" }, "PERIODICAURADAMAGESELFSELF", periodicSelfSelf)
+Parser:AddGlobal("damage", { "CHAT_MSG_SPELL_PERIODIC_SELF_DAMAGE" }, "PERIODICAURADAMAGEOTHERSELF", periodicOtherSelf)
 
 local function missSelfOther(_, targetName) recordAvoidance(getPlayerName(), "Auto Attack", targetName, "Miss") end
 local function dodgeSelfOther(_, targetName) recordAvoidance(getPlayerName(), "Auto Attack", targetName, "Dodge") end
@@ -462,33 +547,33 @@ local function spellMissOtherOther(_, sourceName, spellName, targetName) recordA
 local function spellResistOtherOther(_, sourceName, spellName, targetName) recordAvoidance(sourceName, spellName, targetName, "Resist") end
 local function spellImmuneOtherOther(_, sourceName, spellName, targetName) recordAvoidance(sourceName, spellName, targetName, "Immune") end
 
-Parser:AddPattern(selfHitEvents, "You miss %s.", missSelfOther, false, "MISS_EN_SELFOTHER")
-Parser:AddPattern(selfHitEvents, "You attack. %s dodges.", dodgeSelfOther, false, "DODGE_EN_SELFOTHER")
-Parser:AddPattern(selfHitEvents, "You attack. %s parries.", parrySelfOther, false, "PARRY_EN_SELFOTHER")
-Parser:AddPattern(selfHitEvents, "You attack but %s is immune.", immuneSelfOther, false, "IMMUNE_EN_SELFOTHER")
+Parser:AddPattern("avoidance", selfHitEvents, "You miss %s.", missSelfOther, false, "MISS_EN_SELFOTHER")
+Parser:AddPattern("avoidance", selfHitEvents, "You attack. %s dodges.", dodgeSelfOther, false, "DODGE_EN_SELFOTHER")
+Parser:AddPattern("avoidance", selfHitEvents, "You attack. %s parries.", parrySelfOther, false, "PARRY_EN_SELFOTHER")
+Parser:AddPattern("avoidance", selfHitEvents, "You attack but %s is immune.", immuneSelfOther, false, "IMMUNE_EN_SELFOTHER")
 
-Parser:AddPattern(otherSelfHitEvents, "%s misses you.", missOtherSelf, false, "MISS_EN_OTHERSELF")
-Parser:AddPattern(otherSelfHitEvents, "%s attacks. You dodge.", dodgeOtherSelf, false, "DODGE_EN_OTHERSELF")
-Parser:AddPattern(otherSelfHitEvents, "%s attacks. You parry.", parryOtherSelf, false, "PARRY_EN_OTHERSELF")
-Parser:AddPattern(otherSelfHitEvents, "%s attacks but you are immune.", immuneOtherSelf, false, "IMMUNE_EN_OTHERSELF")
+Parser:AddPattern("avoidance", otherSelfHitEvents, "%s misses you.", missOtherSelf, false, "MISS_EN_OTHERSELF")
+Parser:AddPattern("avoidance", otherSelfHitEvents, "%s attacks. You dodge.", dodgeOtherSelf, false, "DODGE_EN_OTHERSELF")
+Parser:AddPattern("avoidance", otherSelfHitEvents, "%s attacks. You parry.", parryOtherSelf, false, "PARRY_EN_OTHERSELF")
+Parser:AddPattern("avoidance", otherSelfHitEvents, "%s attacks but you are immune.", immuneOtherSelf, false, "IMMUNE_EN_OTHERSELF")
 
-Parser:AddPattern(otherOtherHitEvents, "%s misses %s.", missOtherOther, false, "MISS_EN_OTHEROTHER")
-Parser:AddPattern(otherOtherHitEvents, "%s attacks. %s dodges.", dodgeOtherOther, false, "DODGE_EN_OTHEROTHER")
-Parser:AddPattern(otherOtherHitEvents, "%s attacks. %s parries.", parryOtherOther, false, "PARRY_EN_OTHEROTHER")
-Parser:AddPattern(otherOtherHitEvents, "%s attacks but %s is immune.", immuneOtherOther, false, "IMMUNE_EN_OTHEROTHER")
+Parser:AddPattern("avoidance", otherOtherHitEvents, "%s misses %s.", missOtherOther, false, "MISS_EN_OTHEROTHER")
+Parser:AddPattern("avoidance", otherOtherHitEvents, "%s attacks. %s dodges.", dodgeOtherOther, false, "DODGE_EN_OTHEROTHER")
+Parser:AddPattern("avoidance", otherOtherHitEvents, "%s attacks. %s parries.", parryOtherOther, false, "PARRY_EN_OTHEROTHER")
+Parser:AddPattern("avoidance", otherOtherHitEvents, "%s attacks but %s is immune.", immuneOtherOther, false, "IMMUNE_EN_OTHEROTHER")
 
-Parser:AddPattern(selfSpellEvents, "Your %s misses %s.", spellMissSelfOther, false, "SPELLMISS_EN_SELFOTHER")
-Parser:AddPattern(selfSpellEvents, "Your %s was resisted by %s.", spellResistSelfOther, false, "SPELLRESIST_EN_SELFOTHER")
-Parser:AddPattern(selfSpellEvents, "Your %s fails. %s is immune.", spellImmuneSelfOther, false, "SPELLIMMUNE_EN_SELFOTHER")
-Parser:AddPattern(selfSpellEvents, "%s is immune to your %s.", spellImmuneSelfOtherAlt, false, "SPELLIMMUNE_EN_SELFOTHER_ALT")
+Parser:AddPattern("avoidance", selfSpellEvents, "Your %s misses %s.", spellMissSelfOther, false, "SPELLMISS_EN_SELFOTHER")
+Parser:AddPattern("avoidance", selfSpellEvents, "Your %s was resisted by %s.", spellResistSelfOther, false, "SPELLRESIST_EN_SELFOTHER")
+Parser:AddPattern("avoidance", selfSpellEvents, "Your %s fails. %s is immune.", spellImmuneSelfOther, false, "SPELLIMMUNE_EN_SELFOTHER")
+Parser:AddPattern("avoidance", selfSpellEvents, "%s is immune to your %s.", spellImmuneSelfOtherAlt, false, "SPELLIMMUNE_EN_SELFOTHER_ALT")
 
-Parser:AddPattern(otherSelfSpellEvents, "%s's %s misses you.", spellMissOtherSelf, false, "SPELLMISS_EN_OTHERSELF")
-Parser:AddPattern(otherSelfSpellEvents, "%s's %s was resisted.", spellResistOtherSelf, false, "SPELLRESIST_EN_OTHERSELF")
-Parser:AddPattern(otherSelfSpellEvents, "%s's %s fails. You are immune.", spellImmuneOtherSelf, false, "SPELLIMMUNE_EN_OTHERSELF")
+Parser:AddPattern("avoidance", otherSelfSpellEvents, "%s's %s misses you.", spellMissOtherSelf, false, "SPELLMISS_EN_OTHERSELF")
+Parser:AddPattern("avoidance", otherSelfSpellEvents, "%s's %s was resisted.", spellResistOtherSelf, false, "SPELLRESIST_EN_OTHERSELF")
+Parser:AddPattern("avoidance", otherSelfSpellEvents, "%s's %s fails. You are immune.", spellImmuneOtherSelf, false, "SPELLIMMUNE_EN_OTHERSELF")
 
-Parser:AddPattern(otherOtherSpellEvents, "%s's %s misses %s.", spellMissOtherOther, false, "SPELLMISS_EN_OTHEROTHER")
-Parser:AddPattern(otherOtherSpellEvents, "%s's %s was resisted by %s.", spellResistOtherOther, false, "SPELLRESIST_EN_OTHEROTHER")
-Parser:AddPattern(otherOtherSpellEvents, "%s's %s fails. %s is immune.", spellImmuneOtherOther, false, "SPELLIMMUNE_EN_OTHEROTHER")
+Parser:AddPattern("avoidance", otherOtherSpellEvents, "%s's %s misses %s.", spellMissOtherOther, false, "SPELLMISS_EN_OTHEROTHER")
+Parser:AddPattern("avoidance", otherOtherSpellEvents, "%s's %s was resisted by %s.", spellResistOtherOther, false, "SPELLRESIST_EN_OTHEROTHER")
+Parser:AddPattern("avoidance", otherOtherSpellEvents, "%s's %s fails. %s is immune.", spellImmuneOtherOther, false, "SPELLIMMUNE_EN_OTHEROTHER")
 
 local selfHealEvents = { "CHAT_MSG_SPELL_SELF_BUFF" }
 local otherHealEvents = {
@@ -500,18 +585,18 @@ local periodicOtherHealEvents = {
   "CHAT_MSG_SPELL_PERIODIC_HOSTILEPLAYER_BUFFS",
 }
 
-Parser:AddGlobal(selfHealEvents, "HEALEDCRITSELFSELF", healSelfSelf)
-Parser:AddGlobal(selfHealEvents, "HEALEDSELFSELF", healSelfSelf)
-Parser:AddGlobal(selfHealEvents, "HEALEDCRITSELFOTHER", healSelfOther)
-Parser:AddGlobal(selfHealEvents, "HEALEDSELFOTHER", healSelfOther)
-Parser:AddGlobal(otherHealEvents, "HEALEDCRITOTHERSELF", healOtherSelf)
-Parser:AddGlobal(otherHealEvents, "HEALEDOTHERSELF", healOtherSelf)
-Parser:AddGlobal(otherHealEvents, "HEALEDCRITOTHEROTHER", healOtherOther)
-Parser:AddGlobal(otherHealEvents, "HEALEDOTHEROTHER", healOtherOther)
-Parser:AddGlobal(periodicOtherHealEvents, "PERIODICAURAHEALSELFOTHER", periodicHealSelfOther)
-Parser:AddGlobal(periodicOtherHealEvents, "PERIODICAURAHEALOTHEROTHER", periodicHealOtherOther)
-Parser:AddGlobal({ "CHAT_MSG_SPELL_PERIODIC_SELF_BUFFS" }, "PERIODICAURAHEALSELFSELF", periodicHealSelfSelf)
-Parser:AddGlobal({ "CHAT_MSG_SPELL_PERIODIC_SELF_BUFFS" }, "PERIODICAURAHEALOTHERSELF", periodicHealOtherSelf)
+Parser:AddGlobal("healing", selfHealEvents, "HEALEDCRITSELFSELF", healSelfSelf)
+Parser:AddGlobal("healing", selfHealEvents, "HEALEDSELFSELF", healSelfSelf)
+Parser:AddGlobal("healing", selfHealEvents, "HEALEDCRITSELFOTHER", healSelfOther)
+Parser:AddGlobal("healing", selfHealEvents, "HEALEDSELFOTHER", healSelfOther)
+Parser:AddGlobal("healing", otherHealEvents, "HEALEDCRITOTHERSELF", healOtherSelf)
+Parser:AddGlobal("healing", otherHealEvents, "HEALEDOTHERSELF", healOtherSelf)
+Parser:AddGlobal("healing", otherHealEvents, "HEALEDCRITOTHEROTHER", healOtherOther)
+Parser:AddGlobal("healing", otherHealEvents, "HEALEDOTHEROTHER", healOtherOther)
+Parser:AddGlobal("healing", periodicOtherHealEvents, "PERIODICAURAHEALSELFOTHER", periodicHealSelfOther)
+Parser:AddGlobal("healing", periodicOtherHealEvents, "PERIODICAURAHEALOTHEROTHER", periodicHealOtherOther)
+Parser:AddGlobal("healing", { "CHAT_MSG_SPELL_PERIODIC_SELF_BUFFS" }, "PERIODICAURAHEALSELFSELF", periodicHealSelfSelf)
+Parser:AddGlobal("healing", { "CHAT_MSG_SPELL_PERIODIC_SELF_BUFFS" }, "PERIODICAURAHEALOTHERSELF", periodicHealOtherSelf)
 
 local function powerSelfSelf(_, amount, powerType, spellName)
   recordPower(getPlayerName(), getPlayerName(), amount, powerType, spellName)
@@ -526,13 +611,13 @@ local function powerOtherOther(_, targetName, amount, powerType, sourceName, spe
   recordPower(targetName, sourceName, amount, powerType, spellName)
 end
 
-Parser:AddPattern(selfHealEvents, "You gain %d %s from %s's %s.", powerOtherSelf, false, "POWER_EN_OTHERSELF")
-Parser:AddPattern(selfHealEvents, "You gain %d %s from %s.", powerSelfSelf, false, "POWER_EN_SELFSELF")
-Parser:AddPattern(selfHealEvents, "%s gains %d %s from your %s.", powerSelfOther, false, "POWER_EN_SELFOTHER")
-Parser:AddPattern({ "CHAT_MSG_SPELL_PERIODIC_SELF_BUFFS" }, "You gain %d %s from %s's %s.", powerOtherSelf, false, "POWER_EN_OTHERSELF_PERIODIC")
-Parser:AddPattern(otherHealEvents, "You gain %d %s from %s's %s.", powerOtherSelf, false, "POWER_EN_OTHERSELF")
-Parser:AddPattern(otherHealEvents, "%s gains %d %s from %s's %s.", powerOtherOther, false, "POWER_EN_OTHEROTHER")
-Parser:AddPattern(periodicOtherHealEvents, "%s gains %d %s from %s's %s.", powerOtherOther, false, "POWER_EN_OTHEROTHER_PERIODIC")
+Parser:AddPattern("power", selfHealEvents, "You gain %d %s from %s's %s.", powerOtherSelf, false, "POWER_EN_OTHERSELF")
+Parser:AddPattern("power", selfHealEvents, "You gain %d %s from %s.", powerSelfSelf, false, "POWER_EN_SELFSELF")
+Parser:AddPattern("power", selfHealEvents, "%s gains %d %s from your %s.", powerSelfOther, false, "POWER_EN_SELFOTHER")
+Parser:AddPattern("power", { "CHAT_MSG_SPELL_PERIODIC_SELF_BUFFS" }, "You gain %d %s from %s's %s.", powerOtherSelf, false, "POWER_EN_OTHERSELF_PERIODIC")
+Parser:AddPattern("power", otherHealEvents, "You gain %d %s from %s's %s.", powerOtherSelf, false, "POWER_EN_OTHERSELF")
+Parser:AddPattern("power", otherHealEvents, "%s gains %d %s from %s's %s.", powerOtherOther, false, "POWER_EN_OTHEROTHER")
+Parser:AddPattern("power", periodicOtherHealEvents, "%s gains %d %s from %s's %s.", powerOtherOther, false, "POWER_EN_OTHEROTHER_PERIODIC")
 
 local interruptEvents = {
   "CHAT_MSG_SPELL_SELF_DAMAGE", "CHAT_MSG_SPELL_PARTY_DAMAGE",
@@ -549,41 +634,37 @@ end
 local function interruptOtherSelf(_, sourceName, interruptedSpellName)
   Skada.Tracking:RecordRawInterrupt(sourceName, getPlayerName(), interruptedSpellName, GetTime())
 end
-Parser:AddGlobal(interruptEvents, "SPELLINTERRUPTSELFOTHER", interruptSelfOther)
-Parser:AddGlobal(interruptEvents, "SPELLINTERRUPTOTHEROTHER", interruptOtherOther)
-Parser:AddGlobal(interruptEvents, "SPELLINTERRUPTOTHERSELF", interruptOtherSelf)
-Parser:AddPattern(interruptEvents, "You interrupt %s's %s.", interruptSelfOther, false, "INTERRUPT_EN_SELFOTHER")
-Parser:AddPattern(interruptEvents, "%s interrupts %s's %s.", interruptOtherOther, false, "INTERRUPT_EN_OTHEROTHER")
-Parser:AddPattern(interruptEvents, "%s interrupts your %s.", interruptOtherSelf, false, "INTERRUPT_EN_OTHERSELF")
+Parser:AddGlobal("interrupt", interruptEvents, "SPELLINTERRUPTSELFOTHER", interruptSelfOther)
+Parser:AddGlobal("interrupt", interruptEvents, "SPELLINTERRUPTOTHEROTHER", interruptOtherOther)
+Parser:AddGlobal("interrupt", interruptEvents, "SPELLINTERRUPTOTHERSELF", interruptOtherSelf)
+Parser:AddPattern("interrupt", interruptEvents, "You interrupt %s's %s.", interruptSelfOther, false, "INTERRUPT_EN_SELFOTHER")
+Parser:AddPattern("interrupt", interruptEvents, "%s interrupts %s's %s.", interruptOtherOther, false, "INTERRUPT_EN_OTHEROTHER")
+Parser:AddPattern("interrupt", interruptEvents, "%s interrupts your %s.", interruptOtherSelf, false, "INTERRUPT_EN_OTHERSELF")
 
 local auraBreakEvents = { "CHAT_MSG_SPELL_BREAK_AURA" }
 local function auraRemovedOther(_, targetName, auraName)
-  if suppressedFacts.dispel then return end
   Skada.Tracking:RecordRawDispel(targetName, auraName, GetTime())
 end
 local function auraRemovedSelf(_, auraName)
-  if suppressedFacts.dispel then return end
   Skada.Tracking:RecordRawDispel(getPlayerName(), auraName, GetTime())
 end
-Parser:AddPattern(auraBreakEvents, "%s's %s is removed.", auraRemovedOther, false, "AURA_REMOVED_EN_OTHER")
-Parser:AddPattern(auraBreakEvents, "Your %s is removed.", auraRemovedSelf, false, "AURA_REMOVED_EN_SELF")
+Parser:AddPattern("dispel", auraBreakEvents, "%s's %s is removed.", auraRemovedOther, false, "AURA_REMOVED_EN_OTHER")
+Parser:AddPattern("dispel", auraBreakEvents, "Your %s is removed.", auraRemovedSelf, false, "AURA_REMOVED_EN_SELF")
 
 local deathEvents = { "CHAT_MSG_COMBAT_FRIENDLY_DEATH", "CHAT_MSG_COMBAT_HOSTILE_DEATH" }
 local function deathOther(_, targetName)
-  if suppressedFacts.death then return end
   local lastDamage = Skada.Tracking and Skada.Tracking:GetLastDamageInfo(targetName)
   Skada.Data:RecordDeath(targetName, GetTime(), lastDamage and lastDamage.sourceName, lastDamage and lastDamage.spellName)
 end
 local function deathSelf()
-  if suppressedFacts.death then return end
   local playerName = getPlayerName()
   local lastDamage = Skada.Tracking and Skada.Tracking:GetLastDamageInfo(playerName)
   Skada.Data:RecordDeath(playerName, GetTime(), lastDamage and lastDamage.sourceName, lastDamage and lastDamage.spellName)
 end
-Parser:AddGlobal(deathEvents, "UNITDIESOTHER", deathOther)
-Parser:AddGlobal(deathEvents, "UNITDIESSELF", deathSelf)
-Parser:AddPattern(deathEvents, "%s dies.", deathOther, false, "DEATH_EN_OTHER")
-Parser:AddPattern(deathEvents, "You die.", deathSelf, false, "DEATH_EN_SELF")
+Parser:AddGlobal("death", deathEvents, "UNITDIESOTHER", deathOther)
+Parser:AddGlobal("death", deathEvents, "UNITDIESSELF", deathSelf)
+Parser:AddPattern("death", deathEvents, "%s dies.", deathOther, false, "DEATH_EN_OTHER")
+Parser:AddPattern("death", deathEvents, "You die.", deathSelf, false, "DEATH_EN_SELF")
 
 function Parser:GetMissCount()
   local total = 0

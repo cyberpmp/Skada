@@ -5,9 +5,9 @@ Skada.CastTracker = CastTracker
 
 local type = type
 local pairs = pairs
-local table_getn = table.getn
-local table_insert = table.insert
-local table_remove = table.remove
+local table_getn = SkadaCompat.Table.getn
+local table_insert = SkadaCompat.Table.insert
+local table_remove = SkadaCompat.Table.remove
 
 local dispelCasts = {
   [527] = 1, [988] = 2,

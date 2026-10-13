@@ -1,4 +1,5 @@
 local Skada = (_G or getfenv(0)).Skada
+local CreateFrame = SkadaCompat.CreateFrame
 
 local MinimapButton = {}
 Skada.MinimapButton = MinimapButton

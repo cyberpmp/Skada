@@ -1,4 +1,5 @@
 local Skada = (_G or getfenv(0)).Skada
+local CreateFrame = SkadaCompat.CreateFrame
 
 local Report = {}
 Skada.UIReport = Report
@@ -8,11 +9,11 @@ local setReadableFont = Common.SetFont
 local getTooltip = Common.GetTooltip
 local Style = Skada.UIStyle
 
-local table_getn = table.getn
+local table_getn = SkadaCompat.Table.getn
 local string_gsub = string.gsub
 local string_sub = string.sub
-local table_insert = table.insert
-local table_sort = table.sort
+local table_insert = SkadaCompat.Table.insert
+local table_sort = SkadaCompat.Table.sort
 
 local setUiFont = Style.SetUIFont
 
@@ -148,16 +149,11 @@ function Report:CreateActionMenu(owner, anchor)
 
     entry.text = entry:CreateFontString(nil, "OVERLAY")
     entry.text:SetPoint("LEFT", entry, "LEFT", 7, 0)
-    entry.text:SetPoint("RIGHT", entry, "RIGHT", -38, 0)
+    entry.text:SetPoint("RIGHT", entry, "RIGHT", -7, 0)
     entry.text:SetJustifyH("LEFT")
     setReadableFont(entry.text, 12)
     entry.text:SetText(label)
     entry.text:SetTextColor(0.84, 0.86, 0.90, 1)
-
-    entry.value = entry:CreateFontString(nil, "OVERLAY")
-    entry.value:SetPoint("RIGHT", entry, "RIGHT", -7, 0)
-    entry.value:SetJustifyH("RIGHT")
-    setReadableFont(entry.value, 11)
 
     entry:SetScript("OnEnter", function(self)
       self.highlight:Show()
@@ -184,10 +180,6 @@ function Report:CreateActionMenu(owner, anchor)
       Skada.Options:Open()
       Skada.Options:SelectWindow(owner)
     end
-  end)
-  createEntry("logging", "Combat logging", function()
-    owner.manager:SetActive(owner)
-    Skada:SetCombatLogging(not Skada.combatLogging)
   end)
   createEntry("report", "Report meter", function()
     owner.manager:SetActive(owner)
@@ -230,12 +222,6 @@ function Report:CreateActionMenu(owner, anchor)
       end
     end
     self:SetHeight(offset + 4)
-    self.byKey.logging.value:SetText(Skada.combatLogging and "On" or "Off")
-    if Skada.combatLogging then
-      self.byKey.logging.value:SetTextColor(0.20, 1, 0.20, 1)
-    else
-      self.byKey.logging.value:SetTextColor(0.68, 0.68, 0.72, 1)
-    end
   end
 
   function menu:Toggle()
@@ -343,7 +329,8 @@ function Report:ShowReportPopup(window)
     popup:SetScript("OnDragStart", function() popup:StartMoving() end)
     popup:SetScript("OnDragStop", function() popup:StopMovingOrSizing() end)
     Style:ApplyDialogFrame(popup)
-    if UISpecialFrames then table_insert(UISpecialFrames, "SkadaReportPopup") end
+    -- The client's own insert on the client's own list (ESC closes).
+    if UISpecialFrames then tinsert(UISpecialFrames, "SkadaReportPopup") end
 
     popup.dialogTitle = Style:CreateDialogTitle(popup, "Skada")
 

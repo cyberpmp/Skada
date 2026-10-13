@@ -16,7 +16,7 @@ Skada.Options = Options
 local Schema = Skada.OptionsSchema
 local Dialog = Skada.OptionsDialog
 
-local table_getn = table.getn
+local table_getn = SkadaCompat.Table.getn
 
 function Options:GetCurrentWindow()
   local window = self.selectedWindow

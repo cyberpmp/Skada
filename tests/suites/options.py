@@ -22,16 +22,18 @@ def run(ctx: Context):
       end
 
       -- tests/stubs.lua installs RollFor's captures-only string.match before
-      -- the addon loads, as the real client does; core.compat must have
-      -- probed and swapped in a correct one, or Skada's own slash-command
-      -- parsing (Common.Match binds it at load) returns nil for every
-      -- capture-less pattern.
-      assert(strmatch("AceConfigDialog-3.0", "[A-Za-z]%-[0-9]") == "g-3",
-        "capture-less strmatch did not return the whole match")
-      assert(strmatch("v1 v2", "v(%d)", 3) == "2", "strmatch ignored its init argument")
-      local settingKey, settingValue = strmatch("width=700", "^(%w+)=(%w+)$")
-      assert(settingKey == "width" and settingValue == "700", "strmatch dropped a capture")
-      assert(strmatch("abc", "%d") == nil, "strmatch returned a value for a non-match")
+      -- the addon loads, as the real client does. Skada probes it and
+      -- matches through its own SkadaCompat.Match instead (Common.Match binds
+      -- it at load, and slash-command parsing is a capture-less pattern),
+      -- leaving the global exactly as RollFor left it.
+      local match = SkadaCompat.Match
+      assert(match("AceConfigDialog-3.0", "[A-Za-z]%-[0-9]") == "g-3",
+        "capture-less match did not return the whole match")
+      assert(match("v1 v2", "v(%d)", 3) == "2", "match ignored its init argument")
+      local settingKey, settingValue = match("width=700", "^(%w+)=(%w+)$")
+      assert(settingKey == "width" and settingValue == "700", "match dropped a capture")
+      assert(match("abc", "%d") == nil, "match returned a value for a non-match")
+      assert(Skada.Common.Match == match, "Skada's own parsing does not use the probed match")
 
       -- Script hooks chain by hand and pass the client's arguments through:
       -- the client's own HookScript drops them.
@@ -45,57 +47,12 @@ def run(ctx: Context):
       assert(seenSecond and seenSecond[1] == hooked and seenSecond[2] == "LeftButton",
         "appended handler did not receive the arguments")
 
-      -- The SetParent shim: SetParent into an AceGUI-owned frame (`.obj` set)
-      -- re-derives strata and level from the new parent, subtree included,
-      -- but keeps larger level gaps set on purpose. Plain frames keep the
-      -- client's native reparenting. (The shim exists for BigDebuffs' own
-      -- Ace3 copy now; Skada's dialog builds everything under its root
-      -- directly and never reparents.)
-      local host = CreateFrame("Frame", nil, UIParent)
-      host.obj = { type = "SimpleGroup" }
-      host:SetFrameStrata("DIALOG")
-      host:SetFrameLevel(7)
-      local moved = CreateFrame("Frame", nil, UIParent)
-      local inner = CreateFrame("Button", nil, moved)
-      assert(moved:GetFrameStrata() == "MEDIUM" and moved:GetFrameLevel() == 2,
-        "stub frames must start with UIParent's strata and level + 1")
-      moved:SetParent(host)
-      assert(moved:GetFrameStrata() == "DIALOG" and moved:GetFrameLevel() == 8,
-        "SetParent must re-derive the moved frame's strata and level")
-      assert(inner:GetFrameStrata() == "DIALOG" and inner:GetFrameLevel() == 9,
-        "SetParent must carry the moved frame's subtree along")
-      local lowHost = CreateFrame("Frame", nil, UIParent)
-      lowHost.obj = { type = "SimpleGroup" }
-      local spaced = CreateFrame("Frame", nil, UIParent)
-      local spacedInner = CreateFrame("Frame", nil, spaced)
-      spacedInner:SetFrameLevel(spaced:GetFrameLevel() + 3)
-      assert(spacedInner:GetFrameLevel() == 5)
-      spaced:SetParent(lowHost)
-      assert(spaced:GetFrameLevel() == 3 and spacedInner:GetFrameLevel() == 5,
-        "SetParent must keep a deliberate level gap when nothing is inverted")
-      local plainHost = CreateFrame("Frame", nil, UIParent)
-      plainHost:SetFrameStrata("DIALOG")
-      local untouched = CreateFrame("Frame", nil, UIParent)
-      untouched:SetParent(plainHost)
-      assert(untouched:GetFrameStrata() == "MEDIUM" and untouched:GetFrameLevel() == 2,
-        "SetParent into a frame AceGUI does not own must leave layering alone")
-
-      -- Size reads. An anchor-sized frame reports its rendered size in
-      -- screen units on this client (size x effective scale); for AceGUI's
-      -- frames (BigDebuffs' copy) an explicit size wins and a rendered rect
-      -- is divided back, other frames get the client's raw answer.
-      local rendered = CreateFrame("Frame", nil, UIParent)
-      rendered.obj = { type = "SimpleGroup" }
-      rawset(rendered, "stubScale", 0.71)
-      rawset(rendered, "width", 604)              -- 850.7 units as the client reports them
-      assert(math.abs(rendered:GetWidth() - 850.7) < 0.1,
-        "rendered rect must be divided by the effective scale: " .. tostring(rendered:GetWidth()))
-      rendered:SetWidth(540)
-      assert(rendered:GetWidth() == 540, "an explicit size must win for AceGUI frames")
-      local rawFrame = CreateFrame("Frame", nil, UIParent)
+      -- Skada's frames keep the client's raw size answer once rendered;
+      -- the explicit size only fills in while the rect still reads 0.
+      local rawFrame = SkadaCompat.CreateFrame("Frame", nil, UIParent)
       rawset(rawFrame, "stubScale", 0.71)
       rawset(rawFrame, "width", 604)
-      assert(rawFrame:GetWidth() == 604, "frames AceGUI does not own keep the client's raw answer")
+      assert(rawFrame:GetWidth() == 604, "a rendered rect must answer as the client reports it")
     ''')
 
     # ------------------------------------------------------------------
@@ -224,10 +181,10 @@ def run(ctx: Context):
         return counts
       end
       local general = pageTypes()
-      assert(table.getn(dialog.controls) == 11,
+      assert(table.getn(dialog.controls) == 10,
         "General pane did not build every control: " .. table.getn(dialog.controls))
-      assert(general.title == 1 and general.header == 3 and general.toggle == 5 and general.range == 2,
-        "General must be a title, three headings, five toggles and the two snap sliders")
+      assert(general.title == 1 and general.header == 3 and general.toggle == 4 and general.range == 2,
+        "General must be a title, three headings, four toggles and the two snap sliders")
       assert(not dialog.titleAction:IsShown(), "profile pages have no title-row action")
       assert(dialog.controls[1].spec.type == "title" and dialog.controls[1].spec.name == "General"
         and dialog.controls[1].label.textValue == "General"
@@ -267,7 +224,7 @@ def run(ctx: Context):
         "toggles must flow three to a row")
       assert(mergePets.lastPointY == trackAll.lastPointY and trackAll.lastPointY == nampower.lastPointY,
         "toggles in one row must share a y")
-      assert(findControl("Minimap and logging").lastPointY < nampower.lastPointY,
+      assert(findControl("Minimap").lastPointY < nampower.lastPointY,
         "a heading must start a new row below the toggles")
       assert(nampower.disabled == true and nampower.alpha < 1,
         "the Nampower toggle must render dimmed while Nampower is absent")
@@ -578,6 +535,12 @@ def run(ctx: Context):
         set = function(r, g, b) colorRed, colorGreen, colorBlue = r, g, b end,
       }
       local colorButton = Controls.Render(anchor, colorSpec, 170)
+      local shippedStrata, shippedLevel = ColorPickerFrame:GetFrameStrata(), ColorPickerFrame:GetFrameLevel()
+      local shippedChildren = {}
+      local shippedIndex, shippedChild
+      for shippedIndex, shippedChild in ipairs({ ColorPickerFrame:GetChildren() }) do
+        shippedChildren[shippedIndex] = { shippedChild:GetFrameStrata(), shippedChild:GetFrameLevel() }
+      end
       colorButton.OnClick(colorButton)
       assert(ColorPickerFrame:IsShown(), "swatch click did not show the color picker")
       assert(ColorPickerFrame:GetFrameStrata() == "DIALOG")
@@ -601,9 +564,35 @@ def run(ctx: Context):
       ColorPickerFrame.cancelFunc()
       assert(colorRed == 1 and colorGreen == 0.5 and colorBlue == 0.25,
         "the picker's cancelFunc did not restore the previous color")
+      -- A second open while the picker is up must not record Skada's own
+      -- raised layering as the picker's.
+      colorButton.OnClick(colorButton)
       ColorPickerFrame:Hide()
       assert(ColorPickerFrame:IsToplevel() == true,
         "picker's toplevel flag must be restored on hide")
+      assert(ColorPickerFrame:GetFrameStrata() == shippedStrata and ColorPickerFrame:GetFrameLevel() == shippedLevel,
+        "closing Skada's picker left the shared picker raised")
+      for shippedIndex, shippedChild in ipairs({ ColorPickerFrame:GetChildren() }) do
+        assert(shippedChild:GetFrameStrata() == shippedChildren[shippedIndex][1]
+          and shippedChild:GetFrameLevel() == shippedChildren[shippedIndex][2],
+          "closing Skada's picker left a picker child re-layered")
+      end
+      -- Opened by anything else, the picker is left exactly as it is.
+      ColorPickerFrame:SetToplevel(true)
+      ColorPickerFrame:Show()
+      assert(ColorPickerFrame:IsToplevel() == true and ColorPickerFrame:GetFrameLevel() == shippedLevel,
+        "Skada adjusted a picker it did not open")
+      -- Another addon's open session is closed as its Cancel would close
+      -- it, so its own cancel callback undoes its live preview.
+      local otherCancelled
+      ColorPickerFrame.previousValues = { 0.9, 0.9, 0.9 }
+      ColorPickerFrame.cancelFunc = function(previous) otherCancelled = previous end
+      colorButton.OnClick(colorButton)
+      assert(otherCancelled and otherCancelled[1] == 0.9,
+        "claiming the picker skipped the open session's cancel")
+      assert(ColorPickerFrame:IsShown() and ColorPickerFrame:IsToplevel() == false,
+        "the claim after closing another session did not re-layer the picker")
+      ColorPickerFrame:Hide()
 
       -- Executes: the click calls spec.func().
       local executed = false
@@ -844,7 +833,7 @@ def run(ctx: Context):
       end
       assertKeys(generalArgs, {
         trackingHeader = true, mergePets = true, trackAll = true, useNampower = true,
-        clientHeader = true, minimap = true, combatLogging = true,
+        clientHeader = true, minimap = true,
         snapHeader = true, snapDistance = true, snapGap = true,
       }, "General")
       assertKeys(appearanceArgs, {
@@ -1332,7 +1321,7 @@ def run(ctx: Context):
       Skada.Options:Open()
       dialog = Skada.OptionsDialog.Frame()
       assert(dialog:IsShown(), "Open did not reshow the dialog")
-      assert(table.getn(dialog.controls) == 11, "reopen did not rebuild the pane")
+      assert(table.getn(dialog.controls) == 10, "reopen did not rebuild the pane")
       assert(table.getn(dialog.sidebar.rows) == 4 + table.getn(Skada.UI.windows),
         "reopen did not rebuild the sidebar")
       assert(borderEdges[1].vertexR == configuredBorder[1],

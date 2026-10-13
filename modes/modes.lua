@@ -5,8 +5,8 @@ Skada.Modes = Modes
 
 local max = math.max
 local min = math.min
-local table_getn = table.getn
-local table_insert = table.insert
+local table_getn = SkadaCompat.Table.getn
+local table_insert = SkadaCompat.Table.insert
 
 local DataNavigation = Skada.DataNavigation
 

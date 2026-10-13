@@ -1,4 +1,5 @@
 local Skada = (_G or getfenv(0)).Skada
+local table_setn = SkadaCompat.Table.setn
 
 local ThreatEstimator = {
   threatByEnemyKey = {},
@@ -22,8 +23,8 @@ local max = math.max
 local tonumber = tonumber
 local type = type
 local pairs = pairs
-local table_getn = table.getn
-local table_sort = table.sort
+local table_getn = SkadaCompat.Table.getn
+local table_sort = SkadaCompat.Table.sort
 local string_find = string.find
 local setmetatable = setmetatable
 
@@ -558,9 +559,7 @@ function ThreatEstimator:Build(targetName, targetKey, output)
     pool = {}
     entryPoolsByOutput[output] = pool
   end
-  local outputIndex
-  for outputIndex = 1, table_getn(output) do output[outputIndex] = nil end
-  if table.setn then table.setn(output, 0) end
+  table_setn(output, 0)
 
   local enemyKey = self:FindRecordedEnemyKey(targetName, targetKey)
   local enemyThreat = enemyKey and self.threatByEnemyKey[enemyKey]
@@ -583,7 +582,7 @@ function ThreatEstimator:Build(targetName, targetKey, output)
       output[outputCount] = outputEntry
     end
   end
-  if table.setn then table.setn(output, outputCount) end
+  table_setn(output, outputCount)
   table_sort(output, sortThreatDescending)
   if outputCount == 0 then return output, 0 end
 
@@ -603,10 +602,26 @@ function ThreatEstimator:Reset()
   self.targetProbeName, self.targetProbeGUID = nil, nil
 end
 
+-- Estimation only runs while a window holds the threat meter (on any of its
+-- pages). In a 40-man raid every hit, heal and spell-go feeds it -- the heal
+-- path alone probes the target and sweeps every enemy -- so with no window
+-- to read the estimate that cost is pure waste. The threat ticker and window
+-- changes set the flag, so no event walks the window list. Totals are
+-- dropped when the last threat window is hidden or switched to another
+-- meter: one shown again mid-pull estimates from that point on instead of
+-- mixing old totals with a gap.
+function ThreatEstimator:SetWanted(wanted)
+  wanted = wanted and true or false
+  if self.wanted and not wanted then self:Reset() end
+  self.wanted = wanted
+end
+
 Skada:Subscribe("damageRecorded", function(actorName, identity, targetName, amount, spellName, spellID, timestamp, targetGUID)
+  if not ThreatEstimator.wanted then return end
   ThreatEstimator:RecordDamage(actorName, identity, targetName, amount, spellName, spellID, timestamp, targetGUID)
 end)
 Skada:Subscribe("healingRecorded", function(actorName, identity, amount, timestamp)
+  if not ThreatEstimator.wanted then return end
   ThreatEstimator:RecordHealing(actorName, identity, amount, timestamp)
 end)
 Skada:Subscribe("unitDied", function(unitName, unitGUID) ThreatEstimator:RemoveEnemy(unitName, unitGUID) end)
@@ -619,12 +634,13 @@ Skada:RegisterEvent("PLAYER_ENTERING_WORLD", function()
 end)
 Skada:RegisterEvent("PLAYER_TARGET_CHANGED", function()
   ThreatEstimator:ProbeTargetToken()
-  if Skada.Data and Skada.Data.active then ThreatEstimator:ObserveCurrentEnemy(GetTime()) end
+  if Skada.Data and Skada.Data.active and ThreatEstimator.wanted then ThreatEstimator:ObserveCurrentEnemy(GetTime()) end
 end)
 -- Nampower's events never reach the shared frame: its registration is gated
 -- on C_EventUtils.IsEventValid, which does not know Nampower's codes. The
 -- ingest owns the only frame that hears them and republishes spell-go on the
 -- bus; deaths already arrive as unitDied above.
 Skada:Subscribe("spellGo", function(spellID, casterGUID, targetGUID, targetsHit, timestamp)
+  if not ThreatEstimator.wanted then return end
   ThreatEstimator:RecordSpellGo(spellID, casterGUID, targetGUID, targetsHit, timestamp)
 end)

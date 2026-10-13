@@ -74,39 +74,3 @@ def run(ctx: Context):
       assert(touches.owner == 0 and touches.show == 0 and touches.hide == 0,
         "repaint touched the shared GameTooltip")
     ''')
-
-    # The global string.split / strsplit shim follows the standard split
-    # contract: empty fields kept, delimiter characters matched literally,
-    # optional pieces cap with the remainder in the final field. Skada never
-    # calls this itself; other addon code does, and the previous replacement
-    # dropped empty fields and collapsed delimiter runs ("a::b" returned
-    # only "a" and "b"), which broke parsers that count their fields.
-    ctx.run(r'''
-      local chunk, err = loadstring([=[
-        local function collect(...)
-          local out = {}
-          for i = 1, select("#", ...) do out[i] = tostring(select(i, ...)) end
-          return table.concat(out, "|")
-        end
-        assert(collect(string.split(":", "a::b")) == "a||b", "empty fields were dropped")
-        assert(collect(strsplit(",", ",start")) == "|start")
-        assert(collect(strsplit(",;", "a,b;c")) == "a|b|c")
-        assert(collect(strsplit(":|", "a|b:c")) == "a|b|c")
-        -- pattern metacharacters in the delimiter list must split literally
-        assert(collect(strsplit("%a", "1%2")) == "1|2")
-        assert(collect(string.split("-", "a-b")) == "a|b")
-        -- non-string values are read as text, not errors
-        assert(collect(strsplit(" ", 123)) == "123")
-        -- pieces cap: remainder stays in the final field
-        assert(collect(strsplit(",", "a,b,c", 2)) == "a|b,c")
-        assert(collect(strsplit(",", "a,b,c", 1)) == "a,b,c")
-        assert(collect(strsplit(",", "a,b,c", 3)) == "a|b|c")
-        assert(collect(strsplit(",", "a,b,c", 10)) == "a|b|c")
-        -- degenerate inputs
-        assert(collect(strsplit(",", "")) == "")
-        assert(collect(strsplit(":", "abc")) == "abc")
-        assert(select("#", strsplit(":", nil)) == 0)
-      ]=])
-      assert(err == nil, tostring(err))
-      chunk()
-    ''')

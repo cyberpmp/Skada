@@ -55,9 +55,9 @@ def run(ctx: Context):
 
       local menu = meter.actionMenu
       assert(menu and not menu:IsShown())
-      assert(table.getn(menu.entries) == 6)
+      assert(table.getn(menu.entries) == 5)
       assert(menu.byKey.settings.text.textValue == "Settings")
-      assert(menu.byKey.logging.text.textValue == "Combat logging")
+      assert(not menu.byKey.logging, "the retired combat-logging entry is back")
       assert(menu.byKey.report.text.textValue == "Report meter")
       assert(menu.byKey.new.text.textValue == "+  New window")
       assert(menu.byKey.remove.text.textValue == "-  Remove window")
@@ -65,7 +65,7 @@ def run(ctx: Context):
       assert(menu.byKey.reset.text.textR == 1 and menu.byKey.reset.text.textG == 0.48)
       menu:Toggle()
       assert(menu:IsShown() and not menu.byKey.remove:IsShown())
-      assert(menu.height == 128 and menu.byKey.logging.value.textValue == "Off")
+      assert(menu.height == 106)
       assert(menu.lastPoint == "TOPRIGHT" and menu.lastRelativeTo == meter.menuButton)
       assert(menu.alpha == 0.45 and rawget(menu, "OnUpdate"))
       menu.byKey.settings.OnEnter(menu.byKey.settings)
@@ -134,7 +134,7 @@ def run(ctx: Context):
         windows = {},
       }
       Skada.WindowConfig.Migrate(bordered)
-      assert(bordered.visualVersion == 8 and bordered.windowBorderStyle == "solid",
+      assert(bordered.visualVersion == 9 and bordered.windowBorderStyle == "solid",
         "existing bordered profile kept the default grey glow")
       assert(bordered.updateRate == nil and bordered.smoothBars == nil and bordered.barSpeed == nil
         and bordered.hideWindowBorder == nil,
@@ -147,7 +147,7 @@ def run(ctx: Context):
         windows = {},
       }
       Skada.WindowConfig.Migrate(borderless)
-      assert(borderless.visualVersion == 8 and borderless.windowBorderStyle == "none",
+      assert(borderless.visualVersion == 9 and borderless.windowBorderStyle == "none",
         "border migration changed an existing borderless profile")
 
       -- The profile's mirror of the first window's settings is dropped: each
@@ -162,10 +162,16 @@ def run(ctx: Context):
       assert(mirrored.windows[1].width == 300 and mirrored.windows[1].mode == "healing",
         "dropping the mirror touched the window's own settings")
 
+      -- The retired combat-logging toggle leaves no flag behind.
+      local logging = { visualVersion = 8, autoLog = true, windows = {} }
+      Skada.WindowConfig.Migrate(logging)
+      assert(logging.visualVersion == 9 and logging.autoLog == nil,
+        "the retired combat-logging flag survived migration")
+
       -- A fresh profile starts at the current version: no conversions run.
       local fresh = { windows = {} }
       Skada.WindowConfig.Migrate(fresh)
-      assert(fresh.visualVersion == 8 and fresh.windowBorderStyle == nil,
+      assert(fresh.visualVersion == 9 and fresh.windowBorderStyle == nil,
         "a fresh profile ran the upgrade conversions")
 
       -- Docked (bottom-left anchored) windows keep their pixel height across

@@ -5,7 +5,7 @@ Skada.DataNavigation = DataNavigation
 
 local type = type
 local tostring = tostring
-local table_getn = table.getn
+local table_getn = SkadaCompat.Table.getn
 
 local function setSegmentChoice(target, index, value, label, segment)
   local choice = target[index]

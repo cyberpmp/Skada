@@ -7,7 +7,7 @@ local Style = Skada.UIStyle
 local floor = math.floor
 local max = math.max
 local min = math.min
-local table_getn = table.getn
+local table_getn = SkadaCompat.Table.getn
 
 local function rangesOverlap(firstStart, firstEnd, secondStart, secondEnd, tolerance)
   return firstEnd + tolerance >= secondStart and secondEnd + tolerance >= firstStart

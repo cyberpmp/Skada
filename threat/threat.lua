@@ -38,12 +38,12 @@ local wipeTable = Common.Wipe
 
 local pairs = pairs
 local tonumber = tonumber
-local table_getn = table.getn
-local table_insert = table.insert
-local table_sort = table.sort
+local table_getn = SkadaCompat.Table.getn
+local table_insert = SkadaCompat.Table.insert
+local table_sort = SkadaCompat.Table.sort
 local string_find = string.find
 
-local string_gmatch = string.gmatch
+local string_gmatch = Common.GMatch
 local string_match = Common.Match
 local string_sub = string.sub
 
@@ -112,7 +112,7 @@ function Threat:TargetChanged()
   end
   Skada:MarkDirty()
 
-  if self:NeedsUpdates(now) then self:Update(now) end
+  self:Update(now)
 end
 
 -- Everything tied to the previous target or the previous server exchange.
@@ -145,20 +145,39 @@ function Threat:GroupChanged()
   self:TargetChanged()
 end
 
-function Threat:NeedsUpdates(now, wanted)
-  if wanted == nil then
-    local windows = self.windowEnumerator and self.windowEnumerator()
-    if not windows then return false end
-    local windowIndex, window
-    for windowIndex = 1, table_getn(windows) do
-      window = windows[windowIndex]
-      if not window.broken and window.db.visible and window.db.mode == "threat" and window.view == "mode" then
-        wanted = true
-        break
-      end
+-- A visible window whose meter is threat, on whatever page it is on. The
+-- estimate keeps running for it: stepping back to the mode list mid-pull and
+-- forward again must not lose the threat built so far.
+function Threat.HoldsThreat(window)
+  return not window.broken and window.db.visible and window.db.mode == "threat"
+end
+
+-- Returns whether any window holds the threat meter, and whether one has
+-- its threat page on screen (only that one needs live server queries).
+function Threat:ScanWindows()
+  local windows = self.windowEnumerator and self.windowEnumerator()
+  if not windows then return false, false end
+  local held = false
+  local windowIndex, window
+  for windowIndex = 1, table_getn(windows) do
+    window = windows[windowIndex]
+    if Threat.HoldsThreat(window) then
+      if window.view == "mode" then return true, true end
+      held = true
     end
   end
-  if not wanted then return false end
+  return held, false
+end
+
+local function refreshEstimateWanted()
+  Skada.ThreatEstimate:SetWanted((Threat:ScanWindows()))
+end
+-- A window switched to threat starts estimating at once, not on the next tick.
+Skada:Subscribe("windowSettingsChanged", refreshEstimateWanted)
+Skada:Subscribe("windowListChanged", refreshEstimateWanted)
+
+function Threat:NeedsUpdates(now, shown)
+  if not shown then return false end
 
   now = now or GetTime()
   if self.lastResponse and now - self.lastResponse <= self.staleAfter then return true end
@@ -223,7 +242,10 @@ function Threat:ApplyEstimate(now, targetName, targetKey)
 end
 
 function Threat:Update(now)
-  if not self:NeedsUpdates(now) then return end
+  -- Cached for the estimator, which checks it on every combat event.
+  local held, shown = self:ScanWindows()
+  Skada.ThreatEstimate:SetWanted(held)
+  if not self:NeedsUpdates(now, shown) then return end
 
   local targetName = self:GetTargetName(true)
 

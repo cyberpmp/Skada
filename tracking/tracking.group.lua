@@ -3,7 +3,7 @@ local Skada = (_G or getfenv(0)).Skada
 local GroupObserver = {}
 Skada.GroupObserver = GroupObserver
 
-local table_getn = table.getn
+local table_getn = SkadaCompat.Table.getn
 
 function GroupObserver:ObserveGroup(recordNew, now)
   if not self.auraAPI or not Skada.Data.groupTokens then return end

@@ -18,6 +18,17 @@ loaded, this is the checklist to work through.
   data on its own event frame and passes it around internally.
 - **No other addon's SavedVariables**, no global function Skada defines for
   itself that shadows a Blizzard API.
+- **No shared library or API global, replaced or added.** The table
+  library, `unpack`, `string.*` and `CreateFrame` are exactly what the
+  client (and any addon loaded before Skada) left there. Skada's fixes for
+  this client live on `SkadaCompat` and its own files take them as locals.
+  The `boot` suite snapshots every shared library member and API global
+  before Skada loads and fails if one changed; a harness lint fails any
+  Skada file that calls the shared table library directly.
+- **No client settings.** Skada writes no CVar. On Nampower 4.5 and later,
+  registering for an event is what turns it on; an older build is used
+  only if its event CVars are already on, and otherwise Skada stays on
+  chat text.
 
 ## Skada's own surfaces (nothing shared)
 
@@ -43,58 +54,37 @@ loaded, this is the checklist to work through.
   `CHAT_MSG_ADDON` prefixes. It never sends while you are not in combat
   targeting a live enemy, so browsing menus, the bank or the transmog
   service sends nothing.
-- **Combat-log data from Nampower** — read-only access to the debug-log
-  APIs Nampower exposes; never written.
+- **Combat events from Nampower** — read on Skada's own event frame; no
+  Nampower setting is ever written.
 
-## Shared Blizzard frames Skada still touches, and why
+## Shared state Skada still touches, and why
 
-Only one shared frame remains, and it is repaired, not restyled:
+- **`ColorPickerFrame`** (Blizzard's shared color picker), only while Skada
+  itself has it open. On this client a raised frame's strata and level
+  never reach its children, so the Okay and Cancel buttons would stay
+  under the picker's backdrop and every click on them would be swallowed.
+  When Skada's color control opens the picker it records the picker's
+  strata and level; an appended `OnShow`/`OnHide` re-layers the children
+  while Skada owns it and puts strata, level and the toplevel flag back
+  when it closes. Opened by anything else, those scripts do nothing.
+- **`UISpecialFrames`** — Skada's settings dialog and report popup add
+  their names so Escape closes them, through the client's own `tinsert`.
 
-- **`ColorPickerFrame`** (Blizzard's shared color picker). Skada appends an
-  `OnShow`/`OnHide` script that re-layers the frame (`ApplyStrata`,
-  `FixLevels`) so its own settings dialog shows the picker above it. This
-  fixes a vanilla-client bug where the picker or its children load at a
-  strata below dialogs; every addon that opens the picker benefits. Skada
-  never blocks clicks or swallows the picker's Okay/Cancel.
+## Skada's private compatibility layer
 
-## Global functions Skada installs for the whole client
+`core/core.compat.lua` exists because this 1.12.1 client's Lua has real
+gaps. Everything in it is reachable only through `SkadaCompat`:
 
-These live in `core/core.compat.lua` and exist because this vanilla 1.12.1
-client (Nampower/ClassicAPI build) ships a Lua runtime with real bugs.
-Guarded shims only define a function when the client lacks a working one;
-unguarded shims replace a broken native and apply to everything loaded
-after Skada. `libs/` third-party code is excluded from our linting but is
-self-contained.
-
-### Unguarded (replace the native everywhere)
-
-| Override | Why the native is broken | Bounds |
-| --- | --- | --- |
-| `string.split` + `strsplit` | The native `string.split` feeds `table.concat` non-strings ("table contains non-strings") for some inputs. The replacement follows the standard split contract: delimiters are matched literally one character at a time, empty fields are kept (`"a::b"` → `"a"`, `""`, `"b"`), non-string values are read as text, and the optional `pieces` argument caps the field count with the remainder in the final field. | Skada itself never calls it. It exists for other addon code, which is why it must be contract-correct rather than merely good enough for Skada. |
-| `table.getn/setn/insert/remove/sort/concat`, `foreachi`, `unpack` | The client is built with `LUA_COMPAT_GETN` plus a side-tracked table length: `#`, `getn` and everything built on them (sorting a dense table, `tremove` without index) miscount once a table's slot `n` drifts from its real content — items silently vanish, blank entries appear, sorts no-op. The shims re-scan real content (`realgetn`) instead of trusting the tag. | Fixes real breakage in other addons (Bagshui's blank pages, FuBar-style plugins). Scoping them away would mean rewriting every module Skada ships; the semantics match what the addon authors' code was written for. |
-
-### Guarded (only used where the client lacks a working one)
-
-| Override | Purpose |
+| Member | Why |
 | --- | --- |
-| `string.match` rewrite | A `probe`-guarded replacement that fixes range-order blind matching (`"[A%-Z]"` style classes); re-probed each call so a later addon that replaces it again (RollFor's backport) wins cleanly. |
-| `strmatch`, `strtrim`, `wipe`, `floor/ceil/max/min`, `loadstring` | Standard polyfills, defined only if missing. |
-| `ChatEdit_InsertLink` | No-op stub so code that calls it while no object exists does not error the dispatcher. |
-
-### Scoped to Skada's own frames
-
-| Override | Behaviour |
-| --- | --- |
-| `CreateFrame` wrapper | Wraps the native and adds per-frame fixes, but only for frames Skada or its vendored widgets create or template with `OptionsListButtonTemplate`: width/height wrappers remember explicitly-set sizes across scale quirks, a `SetParent` layering shim re-derives strata where the client loses it, and the `OptionsListButtonTemplate` bypass hand-builds rows the client cannot. Frames created by other addons keep native behaviour except the template bypass on the one broken template. |
+| `SkadaCompat.Table` (`getn`, `setn`, `insert`, `remove`, `sort`, `concat`) | The client tracks an array's length as a side fact that goes stale when a table is written directly; the native `sort` and `concat` read that stale count (seen in game as scrambled damage windows). The private library derives every length from the table's contents, never reads through `__index`, and takes fixed parameters (every `...` call allocates on this client). |
+| `SkadaCompat.Match` | RollFor replaces the global `string.match` with a captures-only version. Skada probes whatever is installed and keeps it only if it passes; otherwise it matches through `string.find`. The global is left as RollFor left it. |
+| `SkadaCompat.CreateFrame` | Skada's own frames: `GetWidth`/`GetHeight` answer with the explicit size while the client's rect still reads 0 before the first render. |
+| `SkadaCompat.ApplyStrata`, `FixLevels`, `AppendScript` | Layering and script-chaining helpers for Skada's own frames (the client's `HookScript` drops the original handler's arguments). |
 
 ## If another addon misbehaves while Skada is loaded
 
-1. **Check whether the symptom exists with Skada removed** (rename the
-   `Skada` folder) rather than disabled — load order only matters for
-   Skada's *global shims*, and they are the only shared surface.
-2. If it reproduces, check the addon's code against the tables above —
-   especially whether it binds a shimmed global into a local upvalue at
-   load time (Skada must load first in the `.toc` order for another addon
-   to receive these: alphabetical order puts Skada ahead of most names).
-3. Report the exact failing call. Every shim above is small enough to
-   carve out per-consumer if a real conflict shows up.
+1. **Check whether the symptom exists with Skada disabled.** Skada changes
+   no shared function, so a difference points at the two shared items
+   above or at load-time cost, not at altered library behaviour.
+2. Report the exact failing call along with the addon list.

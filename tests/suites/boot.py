@@ -5,12 +5,29 @@ from harness import Context
 
 def run(ctx: Context):
     ctx.run(r'''
-      -- The table shims must never probe through a metatable: Bagshui's rule
-      -- environment gives its item table an __index that asserts on any
-      -- miss and clears that table through table.getn/table.remove. Native
-      -- Lua 5.0 table functions are raw, so a shim that reads t[1] to find
-      -- the length trips the assertion (seen in game as blank bags and
-      -- "Components/Rules.lua:765: assertion failed!").
+      -- Skada is private: every shared library member and API global is the
+      -- one the client had before Skada loaded, and no member was added.
+      local libraryName, key, value
+      for _, libraryName in ipairs({ "table", "string", "math" }) do
+        for key, value in pairs(_G[libraryName]) do
+          local qualified = libraryName .. "." .. key
+          assert(TestSharedGlobals[qualified] == value, "Skada replaced or added " .. qualified)
+        end
+      end
+      for key, value in pairs(TestSharedGlobals) do
+        local current
+        local _, _, owner, field = string.find(key, "^(%a+)%.(.+)$")
+        if owner then current = _G[owner][field] else current = _G[key] or false end
+        assert(current == value, "Skada changed the shared global " .. key)
+      end
+
+      -- The private table library never probes through a metatable:
+      -- Bagshui's rule environment gives its item table an __index that
+      -- asserts on any miss. The native table functions are raw, so a
+      -- library that reads t[1] to find the length trips the assertion (seen
+      -- in game as blank bags and "Components/Rules.lua:765: assertion
+      -- failed!").
+      local table = SkadaCompat.Table
       local strict = setmetatable({ name = "Hearthstone", quality = 1 }, {
         __index = function(tbl, key) error("strict table probed for " .. tostring(key)) end,
       })
@@ -19,11 +36,9 @@ def run(ctx: Context):
       table.insert(strict, "b")
       assert(table.getn(strict) == 2)
       assert(table.concat(strict, ",") == "a,b")
-      local first, second = unpack(strict)
-      assert(first == "a" and second == "b")
       table.sort(strict, function(left, right) return left > right end)
       assert(rawget(strict, 1) == "b" and rawget(strict, 2) == "a")
-      table.insert(strict, 1, "c")
+      table.insertAt(strict, 1, "c")
       assert(rawget(strict, 1) == "c" and table.getn(strict) == 3)
       assert(table.remove(strict) == "a" and table.remove(strict, 1) == "c")
       assert(table.getn(strict) == 1 and rawget(strict, 1) == "b")
@@ -48,11 +63,11 @@ def run(ctx: Context):
     assert border[1] == 0.10 and border[2] == 0.11 and border[3] == 0.14
     assert skada.UI.visualActive is None
     ctx.run(r'''
-      -- core.compat answers GetWidth/GetHeight with the last explicit size
+      -- SkadaCompat.CreateFrame answers GetWidth/GetHeight with the last explicit size
       -- while the client's rect still reads 0 (nothing rendered yet); the
       -- stub stores sizes under "width"/"height", so zeroing those plays the
       -- unrendered client.
-      local probe = CreateFrame("Frame", nil, UIParent)
+      local probe = SkadaCompat.CreateFrame("Frame", nil, UIParent)
       probe:SetWidth(123)
       probe:SetHeight(45)
       rawset(probe, "width", 0)

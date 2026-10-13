@@ -13,6 +13,11 @@
 -- activate without it, because every Skada aggregate is keyed by actor name.
 
 local Skada = (_G or getfenv(0)).Skada
+local CreateFrame = SkadaCompat.CreateFrame
+local table_getn = SkadaCompat.Table.getn
+local table_insert = SkadaCompat.Table.insert
+local table_remove = SkadaCompat.Table.remove
+local newBoundedMap = Skada.Common.NewBoundedMap
 
 local Nampower = {
   available = false,
@@ -29,6 +34,12 @@ local Nampower = {
   droppedSources = {},
 }
 local DROPPED_SOURCE_LIMIT = 5
+-- A dropped source is described at most once per window. The description
+-- costs owner probes and a dozen concatenations, and in a raid the same
+-- mobs land here on every AoE tick against totems and every hit from
+-- units outside the group.
+local DROPPED_SOURCE_INTERVAL = 30
+local droppedNoteTimes = newBoundedMap(512)
 Skada.Nampower = Nampower
 
 local type = type
@@ -39,8 +50,6 @@ local math_floor = math.floor
 -- newer, including the test runtime.
 local math_mod = math.fmod or math.mod
 local string_find = string.find
-local string_sub = string.sub
-local string_len = string.len
 
 local EMPTY_GUID = "0x0000000000000000"
 
@@ -115,32 +124,20 @@ local POWER_NAMES = {
 -- GUID to name, warmed by every combat event. Bounded so a long session in a
 -- crowded zone cannot grow it without limit; a wipe only costs the next lookup
 -- for each unit still in the fight.
-local nameByGUID = {}
-local nameCacheSize = 0
 local NAME_CACHE_LIMIT = 2000
+local namesByGUID = newBoundedMap(NAME_CACHE_LIMIT)
 -- Appended to the name of a unit that wears a tracked unit's name without
 -- being it. Lower case, so it can never be a character name that
 -- ResolveSource's "Name (Owner)" match would find.
 local OUTSIDER_SUFFIX = " (other)"
 
 local function rememberName(guid, name)
-  if nameByGUID[guid] then
-    nameByGUID[guid] = name
-    return name
-  end
-  if nameCacheSize >= NAME_CACHE_LIMIT then
-    nameByGUID = {}
-    nameCacheSize = 0
-  end
-  nameByGUID[guid] = name
-  nameCacheSize = nameCacheSize + 1
+  namesByGUID:Set(guid, name)
   return name
 end
 
 local function forgetName(guid)
-  if nameByGUID[guid] == nil then return end
-  nameByGUID[guid] = nil
-  nameCacheSize = nameCacheSize - 1
+  namesByGUID:Set(guid, nil)
 end
 
 local function isRealGUID(guid)
@@ -183,25 +180,24 @@ end
 -- cache.
 local SUMMON_RETRIES = 3
 local SUMMON_RECHECK = 3
-local summonMissesByGUID = {}
-local summonCheckedByGUID = {}
-local summonCheckedCount = 0
+local summonChecks = newBoundedMap(NAME_CACHE_LIMIT)
 local summonCheckedGeneration
 
 local function adoptSummon(guid, name)
   local generation = Skada.Data.rosterGeneration
-  if summonCheckedGeneration ~= generation or summonCheckedCount >= NAME_CACHE_LIMIT then
-    summonMissesByGUID = {}
-    summonCheckedByGUID = {}
-    summonCheckedCount = 0
+  if summonCheckedGeneration ~= generation then
+    summonChecks:Clear()
     summonCheckedGeneration = generation
   end
   local now = GetTime()
-  local misses = summonMissesByGUID[guid]
-  if misses and misses >= SUMMON_RETRIES and now - summonCheckedByGUID[guid] < SUMMON_RECHECK then return end
-  if not misses then summonCheckedCount = summonCheckedCount + 1 end
-  summonMissesByGUID[guid] = (misses or 0) + 1
-  summonCheckedByGUID[guid] = now
+  local check = summonChecks.entries[guid]
+  if check then
+    if check.misses >= SUMMON_RETRIES and now - check.checkedAt < SUMMON_RECHECK then return end
+    check.misses = check.misses + 1
+    check.checkedAt = now
+  else
+    summonChecks:Set(guid, { misses = 1, checkedAt = now })
+  end
 
   local ownerGUID = summonerGUID(guid)
   if not ownerGUID or ownerGUID == guid then return end
@@ -250,7 +246,7 @@ function Nampower:ResolveName(guid)
     return rememberName(guid, name)
   end
 
-  local remembered = nameByGUID[guid]
+  local remembered = namesByGUID.entries[guid]
   if not remembered then self.unresolvedGUIDCount = self.unresolvedGUIDCount + 1 end
   return remembered
 end
@@ -301,23 +297,9 @@ end
 local function parseMitigationString(text)
   if type(text) ~= "string" or text == "" then return nil, nil end
 
-  local values, valueCount = {}, 0
-  local cursor, length = 1, string_len(text)
-  while cursor <= length do
-    local separator = string_find(text, ",", cursor, true)
-    local piece
-    if separator then
-      piece = string_sub(text, cursor, separator - 1)
-      cursor = separator + 1
-    else
-      piece = string_sub(text, cursor)
-      cursor = length + 1
-    end
-    valueCount = valueCount + 1
-    values[valueCount] = tonumber(piece) or 0
-  end
-
-  return pickMitigation(values[1], values[2], values[3])
+  -- Captures, not a split table: this runs on every spell hit.
+  local _, _, absorbed, blocked, resisted = string_find(text, "^([^,]*),?([^,]*),?([^,]*)")
+  return pickMitigation(absorbed, blocked, resisted)
 end
 
 -- Recording -----------------------------------------------------------------
@@ -360,6 +342,11 @@ local function describeIdentity(identity)
 end
 
 function Nampower:NoteDroppedSource(guid, name, spellName)
+  local now = GetTime()
+  local notedAt = droppedNoteTimes.entries[guid]
+  if notedAt and now - notedAt < DROPPED_SOURCE_INTERVAL then return end
+  droppedNoteTimes:Set(guid, now)
+
   local notes = self.droppedSources
   local summoner = summonerGUID(guid)
   local owner = summoner and describeGUID(summoner) or "none"
@@ -376,10 +363,10 @@ function Nampower:NoteDroppedSource(guid, name, spellName)
     ", live " .. (UnitName(guid) and "yes" or "no") .. ", owner " .. owner ..
     ", byGUID " .. describeIdentity(Skada.Data:GetIdentityByGUID(guid)) ..
     ", byName " .. describeIdentity(name and Skada.Data:GetIdentityByName(name)) ..
-    ", tries " .. tostring(summonMissesByGUID[guid] or 0)
-  if notes[table.getn(notes)] == text then return end
-  table.insert(notes, text)
-  if table.getn(notes) > DROPPED_SOURCE_LIMIT then table.remove(notes, 1) end
+    ", tries " .. (summonChecks.entries[guid] and summonChecks.entries[guid].misses or 0)
+  if notes[table_getn(notes)] == text then return end
+  table_insert(notes, text)
+  if table_getn(notes) > DROPPED_SOURCE_LIMIT then table_remove(notes, 1) end
 end
 
 local function recordAvoidance(sourceGUID, targetGUID, spellName, avoidanceType)
@@ -526,7 +513,11 @@ end
 -- Registration --------------------------------------------------------------
 
 -- Nampower 4.5.0 and later enable an event as soon as something registers it.
--- Older builds need these CVars, and setting them on a new build is harmless.
+-- Older builds gate these behind CVars. Skada only reads client settings, so
+-- on an older build it uses Nampower only when the CVars are already on --
+-- turned on by the player or another addon -- and stays on chat parsing
+-- otherwise. A CVar turned on later is picked up at the next pull.
+local REGISTRATION_MAJOR, REGISTRATION_MINOR = 4, 5
 local LEGACY_CVARS = {
   "NP_EnableSpellHealEvents",
   "NP_EnableSpellEnergizeEvents",
@@ -596,8 +587,25 @@ function Nampower:Probe()
     return false
   end
 
-  local ok, version = pcall(GetNampowerVersion)
-  self.version = ok and version or nil
+  local ok, major, minor = pcall(GetNampowerVersion)
+  if not ok then
+    major, minor = nil, nil
+  elseif type(major) == "string" then
+    local _
+    _, _, major, minor = string_find(major, "(%d+)%.(%d+)")
+  end
+  major, minor = tonumber(major), tonumber(minor) or 0
+  -- A version that cannot be read (a failing call, a "dev" string) is a
+  -- build newer than this check knows, not a pre-4.5 one: older builds all
+  -- report a plain number.
+  if major then
+    self.version = major .. "." .. minor
+    self.registrationEnables = major > REGISTRATION_MAJOR
+      or (major == REGISTRATION_MAJOR and minor >= REGISTRATION_MINOR)
+  else
+    self.version = "unknown"
+    self.registrationEnables = true
+  end
 
   -- Every aggregate is keyed by actor name, so GUID-only events are useless
   -- without the SuperWoW-style UnitName(guid) extension this client ships.
@@ -621,10 +629,17 @@ function Nampower:Enable()
   if self.active then return true end
   if not self.available and not self:Probe() then return false end
 
-  if SetCVar then
-    local cvarIndex
-    for cvarIndex = 1, table.getn(LEGACY_CVARS) do
-      pcall(SetCVar, LEGACY_CVARS[cvarIndex], "1")
+  if not self.registrationEnables then
+    -- Only a CVar that exists and reads off gates its events; one the
+    -- build never shipped gates nothing.
+    local cvarIndex, ok, value
+    for cvarIndex = 1, table_getn(LEGACY_CVARS) do
+      ok, value = pcall(GetCVar, LEGACY_CVARS[cvarIndex])
+      if ok and value ~= nil and tostring(value) ~= "1" then
+        self.reason = "Nampower " .. self.version .. " has " .. LEGACY_CVARS[cvarIndex] .. " off"
+        self.blockedByCVar = true
+        return false
+      end
     end
   end
 
@@ -634,10 +649,11 @@ function Nampower:Enable()
   end
 
   self.active = true
+  self.blockedByCVar = nil
   self.reason = "active"
 
   local factIndex
-  for factIndex = 1, table.getn(SUPPRESSED_PARSER_FACTS) do
+  for factIndex = 1, table_getn(SUPPRESSED_PARSER_FACTS) do
     Skada.Parser:SuppressFact(SUPPRESSED_PARSER_FACTS[factIndex], true)
   end
 
@@ -645,6 +661,8 @@ function Nampower:Enable()
 end
 
 function Nampower:Disable()
+  self.blockedByCVar = nil
+  if self.available then self.reason = "disabled" end
   if not self.active then return end
 
   local eventName
@@ -653,10 +671,9 @@ function Nampower:Disable()
   end
 
   self.active = false
-  self.reason = self.available and "disabled" or self.reason
 
   local factIndex
-  for factIndex = 1, table.getn(SUPPRESSED_PARSER_FACTS) do
+  for factIndex = 1, table_getn(SUPPRESSED_PARSER_FACTS) do
     Skada.Parser:SuppressFact(SUPPRESSED_PARSER_FACTS[factIndex], false)
   end
 end
@@ -669,7 +686,10 @@ end
 
 function Nampower:GetStatusText()
   if not self.available then return "chat text (" .. self.reason .. ")" end
-  if not self.active then return "chat text (Nampower off)" end
+  if not self.active then
+    if self.reason ~= "available" and self.reason ~= "disabled" then return "chat text (" .. self.reason .. ")" end
+    return "chat text (Nampower off)"
+  end
   return "Nampower events (" .. self.eventCount .. " seen, " .. self.spellGoCount ..
     " spell-go, " .. self.unresolvedGUIDCount .. " unresolved), build " .. tostring(Skada.build or "?")
 end
@@ -678,13 +698,13 @@ end
 -- there are none. Called by /skada status.
 function Nampower:PrintDroppedSources()
   local notes = self.droppedSources
-  if table.getn(notes) == 0 then
+  if table_getn(notes) == 0 then
     Skada:Print("No uncredited damage sources seen.")
     return
   end
-  Skada:Print("Uncredited damage sources (last " .. table.getn(notes) .. "):")
+  Skada:Print("Uncredited damage sources (last " .. table_getn(notes) .. "):")
   local noteIndex
-  for noteIndex = 1, table.getn(notes) do
+  for noteIndex = 1, table_getn(notes) do
     Skada:Print("  " .. notes[noteIndex])
   end
 end
@@ -699,4 +719,10 @@ end)
 
 Skada:RegisterEvent("PLAYER_ENTERING_WORLD", function()
   Nampower:ApplySetting()
+end)
+
+-- The client sends no event when a CVar changes, so a build held back by one
+-- checks again as each pull starts.
+Skada:RegisterEvent("PLAYER_REGEN_DISABLED", function()
+  if Nampower.blockedByCVar then Nampower:ApplySetting() end
 end)

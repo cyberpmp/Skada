@@ -1,15 +1,16 @@
-
 -- Real WoW exposes the classic strXXX globals natively (find/lower/upper/
--- sub/rep/len have existed since Vanilla). Everything else this client
--- doesn't provide — string.split/trim, loadstring, unpack, floor/ceil/max/min
--- as bare globals, hooksecurefunc, wipe, and (critically) self-healing
--- table.getn/setn/insert/remove that don't go stale against native-style
--- `t[#t+1] = v` appends — comes from core/core.compat.lua, loaded here in
--- its .toc position as on the real client; see load_addon() below.
--- Duplicating those fallbacks here would test the duplicate, not the real
--- shim. Lupa's Lua 5.5 has no table.getn/setn at all (removed after 5.1), so
--- nothing between this stub and core.compat.lua's load may call them directly
--- at top level — lazy (inside a function body) is fine.
+-- sub/rep/len have existed since Vanilla), and its Lua 5.1 still carries
+-- table.getn/setn and a global unpack. Lupa's Lua 5.5 dropped those, so they
+-- are stood in for here the way the client's own behave: getn reads the
+-- live border and setn is a no-op. Skada never calls them -- its files use
+-- core/core.compat.lua's private SkadaCompat.Table, and the harness lints
+-- for any direct use -- but tests and stubbed client code may.
+table.getn = table.getn or function(t) return #t end
+table.setn = table.setn or function() end
+unpack = unpack or table.unpack
+tinsert = tinsert or table.insert
+tremove = tremove or table.remove
+
 strfind = string.find
 strlower = string.lower
 strupper = string.upper
@@ -169,7 +170,6 @@ function GetAddOnMetadata(addonName, field)
   if addonName == "Skada" and field == "Version" then return "1.0.0" end
   if addonName == "Skada" and field == "X-Build" then return "test-build" end
 end
-function LoggingCombat() end
 function SendAddonMessage(prefix, message, channel)
   TestAddonPrefix, TestAddonMessage, TestAddonChannel = prefix, message, channel
 end
@@ -221,7 +221,7 @@ local function newObject()
     __index = function(_, key)
       local method = objectMethods[key]
       if method then return method end
-      if type(key) == "string" and key:match("^%u") then return noop end
+      if type(key) == "string" and string.find(key, "^%u") then return noop end
       return nil
     end,
   })

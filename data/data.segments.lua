@@ -9,9 +9,9 @@ local DataAggregator = Skada.DataAggregator
 local BossDetection = Skada.BossDetection
 
 local max = math.max
-local table_getn = table.getn
-local table_insert = table.insert
-local table_remove = table.remove
+local table_getn = SkadaCompat.Table.getn
+local table_insertAt = SkadaCompat.Table.insertAt
+local table_remove = SkadaCompat.Table.remove
 
 local BOSS_TARGET_SCAN_INTERVAL = 1
 
@@ -117,7 +117,7 @@ function DataSegments:EndSegment(now)
   if segment.hasData then
     self.total.duration = self.total.duration + segment.duration
     if segment.duration > 5 and (not Skada.db.profile.onlyBossFights or segment.gotboss) then
-      table_insert(self.history, 1, segment)
+      table_insertAt(self.history, 1, segment)
       self:TrimHistory()
 
       Skada:Publish("segmentArchived", self, segment)

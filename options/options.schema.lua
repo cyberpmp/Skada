@@ -18,8 +18,8 @@ Skada.OptionsSchema = Schema
 local floor = math.floor
 local type = type
 local tostring = tostring
-local table_getn = table.getn
-local table_insert = table.insert
+local table_getn = SkadaCompat.Table.getn
+local table_insert = SkadaCompat.Table.insert
 
 Schema.fontChoices = {
   { value = "Interface\\AddOns\\Skada\\media\\Accidental Presidency.ttf", label = "Accidental Presidency" },
@@ -260,7 +260,7 @@ function Schema:BuildGeneralArgs()
         Skada:MarkDirty()
       end,
     },
-    clientHeader = { type = "header", name = "Minimap and logging", order = 5 },
+    clientHeader = { type = "header", name = "Minimap", order = 5 },
     minimap = {
       type = "toggle", order = 6,
       name = "Show minimap button",
@@ -273,13 +273,6 @@ function Schema:BuildGeneralArgs()
           if value then button:Show() else button:Hide() end
         end
       end,
-    },
-    combatLogging = {
-      type = "toggle", order = 7,
-      name = "Combat file logging",
-      desc = "Write WoWCombatLog.txt for Chronicle upload.",
-      get = function() return Skada.combatLogging and true or false end,
-      set = function(value) Skada:SetCombatLogging(value, true) end,
     },
     snapHeader = { type = "header", name = "Window snapping", order = 10 },
     snapDistance = {

@@ -1,9 +1,11 @@
 local Skada = (_G or getfenv(0)).Skada
+local table_concat = SkadaCompat.Table.concat
+local table_insert = SkadaCompat.Table.insert
 
 local string_match = Skada.Common.Match
 
 local string_lower = string.lower
-local table_getn = table.getn
+local table_getn = SkadaCompat.Table.getn
 
 local commandByName = {}
 
@@ -105,7 +107,7 @@ registerSlashCommand({ name = "uiprobe", handler = function()
   describeFrame("sidebar", dialog.sidebar)
   local sidebarRowIndex
   if dialog.sidebar and dialog.sidebar.rows then
-    for sidebarRowIndex = 1, table.getn(dialog.sidebar.rows) do
+    for sidebarRowIndex = 1, table_getn(dialog.sidebar.rows) do
       describeFrame("row" .. sidebarRowIndex, dialog.sidebar.rows[sidebarRowIndex])
     end
   end
@@ -114,7 +116,7 @@ registerSlashCommand({ name = "uiprobe", handler = function()
   describeFrame("scrollchild", dialog.content)
   if dialog.content and dialog.controls then
     Skada:Print(string.format("pane: controls=%s childW=%s childH=%s",
-      table.getn(dialog.controls),
+      table_getn(dialog.controls),
       tostring(dialog.content.GetWidth and dialog.content:GetWidth()),
       tostring(dialog.content.GetHeight and dialog.content:GetHeight())))
   end
@@ -132,10 +134,10 @@ registerSlashCommand({ name = "uiprobe", handler = function()
     local foci = GetMouseFoci()
     local names = {}
     local fociIndex
-    for fociIndex = 1, table.getn(foci) do
-      table.insert(names, foci[fociIndex]:GetName() or "unnamed")
+    for fociIndex = 1, table_getn(foci) do
+      table_insert(names, foci[fociIndex]:GetName() or "unnamed")
     end
-    Skada:Print("foci: " .. table.concat(names, ", "))
+    Skada:Print("foci: " .. table_concat(names, ", "))
   end
   local cursorX, cursorY = GetCursorPosition()
   Skada:Print(string.format("cursor %.0f,%.0f uiscale %.2f", cursorX or 0, cursorY or 0, UIParent:GetEffectiveScale() or 0))

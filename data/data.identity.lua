@@ -8,10 +8,11 @@ local wipeTable = Common.Wipe
 local trim = Common.Trim
 
 local string_match = Common.Match
+local string_find = string.find
 local pairs = pairs
 
-local table_getn = table.getn
-local table_insert = table.insert
+local table_getn = SkadaCompat.Table.getn
+local table_insert = SkadaCompat.Table.insert
 
 local commonUnitCandidates = { "target", "targettarget", "focus", "focustarget", "mouseover" }
 
@@ -74,6 +75,14 @@ function DataIdentity:AddObservedUnit(unit, interesting, ownerName)
   if not keepsToken then self.unitsByName[name] = unit end
   if guid then self.identitiesByGUID[guid] = identity end
   return identity
+end
+
+-- The roster's own tokens: in a raid it is built from raidN, so a partyN
+-- event for the same member would put a second token on that member's pet.
+local function isGroupToken(unit)
+  if unit == "player" then return true end
+  if GetNumRaidMembers and GetNumRaidMembers() > 0 then return string_find(unit, "^raid%d+$") ~= nil end
+  return string_find(unit, "^party%d+$") ~= nil
 end
 
 local function petTokenFor(unit)
@@ -153,6 +162,7 @@ function DataIdentity:AddSummon(name, ownerName, guid)
 end
 
 function DataIdentity:RebuildRoster()
+  self.rosterRebuildPending = nil
   wipeTable(self.identitiesByName)
   wipeTable(self.identitiesByGUID)
   wipeTable(self.unitsByName)
@@ -280,6 +290,41 @@ local function handleRosterChanged()
   if data and data.identitiesByName then data:RebuildRoster() end
 end
 
+-- Pets are summoned, dismissed and killed constantly in a raid fight, and
+-- each UNIT_PET used to rebuild the whole roster on the spot. Only a group
+-- member's pet matters. A pet summoned onto an empty pet token -- a first
+-- summon, a re-summon after the old pet died -- is just added: it attacks at
+-- once, and nothing on the roster needs to go. The generation bump drops any
+-- "no owner" answer cached for its GUID before it was known. A pet that left
+-- or replaced another leaves a stale entry behind, so those changes fold
+-- into one rebuild on the next data tick.
+local function handlePetChanged(eventName, unit)
+  local data = Skada.Data
+  if not data or not data.identitiesByName or type(unit) ~= "string" or not isGroupToken(unit) then return end
+
+  local petUnit = petTokenFor(unit)
+  local groupTokens = data.groupTokens
+  local tokenIndex
+  for tokenIndex = 1, table_getn(groupTokens) do
+    if groupTokens[tokenIndex] == petUnit then
+      data.rosterRebuildPending = true
+      return
+    end
+  end
+
+  local petName = UnitName(petUnit)
+  if not petName then return end
+  local petGUID = UnitGUID and UnitGUID(petUnit) or nil
+  if petGUID and data.identitiesByGUID[petGUID] then return end
+  local owner = data.identitiesByName[UnitName(unit) or ""]
+  if not owner or not data:AddGroupPet(petUnit, owner.name) then
+    data.rosterRebuildPending = true
+    return
+  end
+  data.rosterGeneration = (data.rosterGeneration or 0) + 1
+  table_insert(groupTokens, petUnit)
+end
+
 local function handleWorldEntry()
   local data = Skada.Data
   if not data or not data.identitiesByName then return end
@@ -292,4 +337,4 @@ end
 Skada:RegisterEvent("PLAYER_ENTERING_WORLD", handleWorldEntry)
 Skada:RegisterEvent("RAID_ROSTER_UPDATE", handleRosterChanged)
 Skada:RegisterEvent("PARTY_MEMBERS_CHANGED", handleRosterChanged)
-Skada:RegisterEvent("UNIT_PET", handleRosterChanged)
+Skada:RegisterEvent("UNIT_PET", handlePetChanged)

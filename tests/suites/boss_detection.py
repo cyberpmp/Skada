@@ -111,6 +111,20 @@ def run(ctx: Context):
       assert(Skada.Data.current.gotboss and Skada.Data.current.name == "Majordomo Executus",
         "BigWigs primary trigger did not identify a custom-rank boss")
 
+      -- A failed cache build backs off instead of switching BigWigs off for
+      -- the session: the next poll skips it, a later one retries.
+      local Boss = Skada.BossDetection
+      local realIterate = BigWigs.IterateModules
+      BigWigs.IterateModules = function() error("module still registering") end
+      Boss:ClearBigWigsCache()
+      TestSetTime(1000)
+      assert(not Boss:LoadBigWigsEncounterCache(BigWigs), "a failing module walk returned a cache")
+      BigWigs.IterateModules = realIterate
+      assert(not Boss:LoadBigWigsEncounterCache(BigWigs), "a failed build retried before its backoff")
+      TestSetTime(1100)
+      assert(Boss:LoadBigWigsEncounterCache(BigWigs), "a failed build never retried")
+      assert(not Boss.bigWigsFailedCore, "a successful retry kept the failure mark")
+
       Skada.Data.current.gotboss = nil
       Skada.Data.current.bossID = nil
       Skada.Data.current.name = "Current"

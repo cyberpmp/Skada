@@ -1,4 +1,6 @@
 local Skada = (_G or getfenv(0)).Skada
+local CreateFrame = SkadaCompat.CreateFrame
+local table_remove = SkadaCompat.Table.remove
 
 Skada.name = Skada.name or "Skada"
 local metadataVersion = GetAddOnMetadata and GetAddOnMetadata(Skada.name, "Version")
@@ -16,8 +18,8 @@ Skada.initialized = false
 
 local type = type
 local tostring = tostring
-local table_getn = table.getn
-local table_insert = table.insert
+local table_getn = SkadaCompat.Table.getn
+local table_insert = SkadaCompat.Table.insert
 
 Skada.defaults = Skada.Defaults.schema
 local ApplyDefaults = Skada.Defaults.ApplyDefaults
@@ -63,7 +65,7 @@ function Skada:UnregisterTicker(name)
   local tickerIndex
   for tickerIndex = 1, table_getn(tickers) do
     if tickers[tickerIndex].name == name then
-      table.remove(tickers, tickerIndex)
+      table_remove(tickers, tickerIndex)
       recomputeMinimumTickerInterval(self)
       return true
     end
@@ -134,24 +136,6 @@ function Skada:GetClassColor(class)
   return Common.GetClassColor(class)
 end
 
-function Skada:SetCombatLogging(enabled, silent)
-  enabled = enabled and true or false
-  if LoggingCombat then
-    LoggingCombat(enabled and 1 or 0)
-    self.combatLogging = enabled
-    self.db.profile.autoLog = enabled
-    self:MarkDirty()
-    if not silent then
-      self:Print("Combat file logging " .. (enabled and "enabled" or "disabled") .. ".")
-    end
-    return true
-  end
-  if not silent then
-    self:Print("The client does not expose LoggingCombat().")
-  end
-  return false
-end
-
 function Skada:Initialize()
   if self.initialized then return end
 
@@ -170,11 +154,6 @@ function Skada:Initialize()
   end
 
   self.initialized = true
-  if self.db.profile.autoLog then
-    self:SetCombatLogging(true, true)
-  else
-    self.combatLogging = false
-  end
   self:MarkDirty()
   self:Print("v" .. self.version .. " loaded. /skada opens settings.")
 end

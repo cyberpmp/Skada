@@ -51,6 +51,7 @@ def run(ctx: Context):
     # Isolate synthetic raid events from the stateful combat suites.
     isolated = Context(*load_addon())
     isolated.run('''
+      local table = SkadaCompat.Table
       for order = 1, 4 do
         local values, comparisons = {}, 0
         for i = 1, 256 do
@@ -174,6 +175,7 @@ def run(ctx: Context):
     ''')
 
     sort_values = isolated.eval('''function(values, descending)
+      local table = SkadaCompat.Table
       if descending then table.sort(values, function(a, b) return a > b end)
       else table.sort(values) end
       return values

@@ -6,7 +6,7 @@ Skada.WindowConfig = WindowConfig
 local floor = math.floor
 local max = math.max
 local pairs = pairs
-local table_getn = table.getn
+local table_getn = SkadaCompat.Table.getn
 local tonumber = tonumber
 
 local WINDOW_DEFAULTS = Skada.Defaults.window
@@ -34,7 +34,7 @@ function WindowConfig.ApplyDefaults(target, source)
 end
 
 -- The saved-profile format version (the field keeps its historical name).
-local PROFILE_VERSION = 8
+local PROFILE_VERSION = 9
 
 -- One-time conversions of saved profiles, oldest first. A fresh profile
 -- starts at the current version. Profiles older than 2.0 (version 4 and
@@ -104,5 +104,12 @@ function WindowConfig.Migrate(profile)
       config.returnAfterCombat = nil
     end
     profile.visualVersion = 8
+  end
+
+  -- The combat-file logging toggle is gone: it only switched the client's
+  -- own /combatlog, which raid uploaders do not read. Drop its flag.
+  if profile.visualVersion < 9 then
+    profile.autoLog = nil
+    profile.visualVersion = 9
   end
 end

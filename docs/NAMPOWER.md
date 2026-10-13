@@ -150,8 +150,7 @@ that damaged it. A death-recap health timeline would be the reason to revisit
   and icons without a spellbook lookup.
 - `GetRaidTargets` returns the raid-marker to GUID assignment, which would let a
   window label enemies by mark.
-- `CombatLogFlush` forces the combat log file buffer to disk, relevant to the
-  combat-logging toggle.
+- `CombatLogFlush` forces the combat log file buffer to disk.
 
 Every function that returns a table reuses one table across calls. Extract the
 values immediately or pass `1` as the `copy` argument.
@@ -159,10 +158,11 @@ values immediately or pass `1` as the `copy` argument.
 ## Version and CVar notes
 
 Nampower 4.5.0 and later enable an event as soon as something registers for it.
-Older builds gate several behind CVars, so `Nampower:Enable` sets
-`NP_EnableSpellHealEvents`, `NP_EnableSpellEnergizeEvents`,
-`NP_EnableAutoAttackEvents` and `NP_EnableSpellGoEvents` on activation. Setting
-them on a newer build does nothing.
+Older builds gate several behind CVars (`NP_EnableSpellHealEvents`,
+`NP_EnableSpellEnergizeEvents`, `NP_EnableAutoAttackEvents`,
+`NP_EnableSpellGoEvents`). Skada never writes them: on an older build it reads
+Nampower only when all four are already on, and otherwise stays on chat text
+with `/skada status` naming the CVar that is off.
 
 The ingest owns its own event frame rather than using `Skada:RegisterEvent`, for
 two reasons: the shared runtime gates registration on `C_EventUtils.IsEventValid`,

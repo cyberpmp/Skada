@@ -1,5 +1,6 @@
 local env = _G or getfenv(0)
 local Skada = env.Skada
+local CreateFrame = SkadaCompat.CreateFrame
 
 -- Skada's own settings dialog, built directly on this 1.12 client's frame
 -- APIs -- no widget library. The options schema (options.schema.lua) stays
@@ -43,10 +44,11 @@ local Common = Skada.Common
 local Style = Skada.UIStyle
 local Schema = Skada.OptionsSchema
 
-local table_getn = table.getn
-local table_insert = table.insert
-local table_remove = table.remove
-local table_sort = table.sort
+local table_getn = SkadaCompat.Table.getn
+local table_insert = SkadaCompat.Table.insert
+local table_insertAt = SkadaCompat.Table.insertAt
+local table_remove = SkadaCompat.Table.remove
+local table_sort = SkadaCompat.Table.sort
 local tostring = tostring
 local setGoldFont = Style.SetGoldFont
 local setWhiteFont = Style.SetWhiteFont
@@ -354,7 +356,7 @@ local function collectSpecs(group)
     end
   end
   table_sort(specs, function(left, right) return (left.order or 999) < (right.order or 999) end)
-  table_insert(specs, 1, {
+  table_insertAt(specs, 1, {
     type = "title", name = group.name, desc = group.desc,
     reserveRight = titleAction and TITLE_ACTION_RESERVE or 0,
   })
@@ -510,7 +512,9 @@ local function createRoot()
   Style:ApplyDialogFrame(root)
   root.dialogTitle = Style:CreateDialogTitle(root, "Skada")
   if UISpecialFrames then
-    table_insert(UISpecialFrames, "SkadaOptionsFrame") -- ESC closes
+    -- ESC closes. The list is the client's, so the client's own insert
+    -- keeps its bookkeeping; Skada's private library is for its own tables.
+    tinsert(UISpecialFrames, "SkadaOptionsFrame")
   end
 
   Controls.SetPopupRoot(root)

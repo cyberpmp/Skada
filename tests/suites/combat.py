@@ -25,7 +25,7 @@ def run(ctx: Context):
 
     ctx.run('''
       local captured = {}
-      Skada.Parser:AddPattern({ "TEST_EVENT" }, "%2$s <- %1$s for %3$d.", function(_, a, b, c)
+      Skada.Parser:AddPattern("None", { "TEST_EVENT" }, "%2$s <- %1$s for %3$d.", function(_, a, b, c)
         captured[1], captured[2], captured[3] = a, b, c
       end)
       Skada.Parser:OnCombatMessage("TEST_EVENT", "Target <- Source for 77.")
@@ -34,7 +34,7 @@ def run(ctx: Context):
         "positional combat format was incorrectly marked as direct captures")
 
       local mixed = {}
-      Skada.Parser:AddPattern({ "TEST_MIXED_EVENT" }, "%2$s <- %s for %3$d.", function(_, a, b, c)
+      Skada.Parser:AddPattern("None", { "TEST_MIXED_EVENT" }, "%2$s <- %s for %3$d.", function(_, a, b, c)
         mixed[1], mixed[2], mixed[3] = a, b, c
       end)
       Skada.Parser:OnCombatMessage("TEST_MIXED_EVENT", "Target <- Source for 77.")
@@ -49,9 +49,9 @@ def run(ctx: Context):
         matchCount = matchCount + 1
         return originalMatch(self, entry, message)
       end
-      Skada.Parser:AddPattern({ "TEST_CACHED_ROUTE" }, "First %s.", function() end)
-      Skada.Parser:AddPattern({ "TEST_CACHED_ROUTE" }, "Second %s.", function() end)
-      Skada.Parser:AddPattern({ "TEST_CACHED_ROUTE" }, "Third %s.", function() end)
+      Skada.Parser:AddPattern("None", { "TEST_CACHED_ROUTE" }, "First %s.", function() end)
+      Skada.Parser:AddPattern("None", { "TEST_CACHED_ROUTE" }, "Second %s.", function() end)
+      Skada.Parser:AddPattern("None", { "TEST_CACHED_ROUTE" }, "Third %s.", function() end)
       assert(Skada.Parser.routes.TEST_CACHED_ROUTE[3].directCaptures,
         "natural-order combat format missed the direct capture fast path")
       Skada.Parser:OnCombatMessage("TEST_CACHED_ROUTE", "Third value.")
@@ -283,4 +283,38 @@ def run(ctx: Context):
         "/skada reset left fight data behind")
       data.current, data.total, data.active = savedCurrent, savedTotal, savedActive
       for historyIndex = 1, table.getn(savedHistory) do data.history[historyIndex] = savedHistory[historyIndex] end
+    ''')
+
+    ctx.run(r'''
+      -- Route caching: a pattern added after a route's first line is tried,
+      -- and a suppressed specific pattern keeps its lines from a live general
+      -- one after it, with the match cache warm or cold.
+      local Parser = Skada.Parser
+      local handled = {}
+      local function record(entry) table.insert(handled, entry.key) end
+      Parser:AddPattern("testSpecific", { "TEST_ROUTE_EVENT" }, "%s crits %s.", record, true, "specific")
+      Skada.frame:OnEvent("TEST_ROUTE_EVENT", "Bob crits Boar.")
+      assert(handled[1] == "specific", "the first pattern did not match")
+      Parser:AddPattern("testGeneral", { "TEST_ROUTE_EVENT" }, "%s %s.", record, false, "general")
+      Skada.frame:OnEvent("TEST_ROUTE_EVENT", "Bob dances.")
+      assert(handled[2] == "general", "a pattern added after the route's first line was never tried")
+
+      Parser:SuppressFact("testSpecific", true)
+      Skada.frame:OnEvent("TEST_ROUTE_EVENT", "Bob crits Boar.")
+      Skada.frame:OnEvent("TEST_ROUTE_EVENT", "Bob dances.")
+      Skada.frame:OnEvent("TEST_ROUTE_EVENT", "Bob crits Boar.")
+      assert(table.getn(handled) == 3 and handled[3] == "general",
+        "a suppressed pattern's line reached the general pattern after it")
+
+      -- The claim is exact, not judged from a pattern's sample line: a live
+      -- pattern the suppressed one's sample misses still loses the lines
+      -- both match.
+      Parser:AddPattern("testClaimer", { "TEST_ROUTE_EVENT_2" }, "%s hits %s.", record, false, "earlier")
+      Parser:AddPattern("testLive", { "TEST_ROUTE_EVENT_2" }, "%s hits Boar.", record, false, "boar")
+      Parser:SuppressFact("testClaimer", true)
+      local before = table.getn(handled)
+      Skada.frame:OnEvent("TEST_ROUTE_EVENT_2", "Bob hits Boar.")
+      assert(table.getn(handled) == before, "a line a suppressed pattern claims reached a later pattern")
+      Parser:SuppressFact("testClaimer", false)
+      Parser:SuppressFact("testSpecific", false)
     ''')

@@ -11,9 +11,9 @@ local getTooltip = Common.GetTooltip
 local pairs = pairs
 local floor = math.floor
 local max = math.max
-local table_getn = table.getn
-local table_insert = table.insert
-local table_sort = table.sort
+local table_getn = SkadaCompat.Table.getn
+local table_insert = SkadaCompat.Table.insert
+local table_sort = SkadaCompat.Table.sort
 
 local function sortEntries(left, right)
   if left.value == right.value then return left.label < right.label end

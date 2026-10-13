@@ -26,8 +26,64 @@ def run(ctx: Context):
       Skada.db.profile.useNampower = true
       Nampower:ApplySetting()
       assert(Nampower.active, "ApplySetting did not enable the ingest")
-      assert(TestLastCVars.NP_EnableSpellHealEvents == "1",
-        "legacy Nampower CVars were not set on enable")
+      assert(TestLastCVars.NP_EnableSpellHealEvents == nil,
+        "Skada wrote a Nampower CVar; it only reads client settings")
+
+      -- An older build gates its events behind CVars Skada never writes: with
+      -- them off it stays on chat text, with them already on it reads.
+      local probedVersion = GetNampowerVersion
+      Nampower:Disable()
+      GetNampowerVersion = function() return 4, 4, 0 end
+      assert(Nampower:Probe())
+      local legacyCVars = { "NP_EnableSpellHealEvents", "NP_EnableSpellEnergizeEvents",
+        "NP_EnableAutoAttackEvents", "NP_EnableSpellGoEvents" }
+      local cvarName
+      for _, cvarName in ipairs(legacyCVars) do
+        TestLastCVars[cvarName] = "0"
+      end
+      assert(not Nampower:Enable() and not Nampower.active,
+        "an older Nampower with its event CVars off was used anyway")
+      assert(string.find(Nampower:GetStatusText(), "NP_Enable", 1, true),
+        "the status line does not say which CVar kept Nampower off")
+      assert(TestLastCVars.NP_EnableSpellHealEvents == "0", "Skada turned an old build's CVars on")
+      for _, cvarName in ipairs(legacyCVars) do
+        TestLastCVars[cvarName] = "1"
+      end
+      -- A CVar turned on after the fact is picked up when the next pull starts.
+      Skada.frame:OnEvent("PLAYER_REGEN_DISABLED")
+      assert(Nampower.active, "an older Nampower whose CVars were turned on later was never used")
+      Nampower:Disable()
+      assert(Nampower:Enable() and Nampower.active,
+        "an older Nampower with its event CVars already on was not used")
+      Nampower:Disable()
+      -- Unticking the setting while a CVar holds Nampower back says it is off.
+      TestLastCVars.NP_EnableSpellHealEvents = "0"
+      assert(not Nampower:Enable())
+      Nampower:Disable()
+      assert(Nampower:GetStatusText() == "chat text (Nampower off)",
+        "the CVar reason outlived turning Nampower off: " .. Nampower:GetStatusText())
+      TestLastCVars.NP_EnableSpellHealEvents = "1"
+      -- A build that never shipped a CVar is not gated by it; a version
+      -- string with a prefix still reads as that version.
+      TestLastCVars = {}
+      assert(Nampower:Enable() and Nampower.active, "a missing CVar was read as off")
+      Nampower:Disable()
+      GetNampowerVersion = function() return "v4.6.1" end
+      assert(Nampower:Probe() and Nampower.registrationEnables, "a prefixed version string was misread")
+      -- An unreadable version is a newer build, never an old CVar-gated one.
+      GetNampowerVersion = function() return "dev" end
+      TestLastCVars.NP_EnableSpellHealEvents = "0"
+      assert(Nampower:Probe() and Nampower.registrationEnables and Nampower.version == "unknown",
+        "an unreadable version was taken for an old build")
+      assert(Nampower:Enable(), "an unreadable version was held back by an old build's CVar")
+      Nampower:Disable()
+      GetNampowerVersion = function() error("broken") end
+      assert(Nampower:Probe() and Nampower.registrationEnables, "a failing version call was taken for an old build")
+      TestLastCVars.NP_EnableSpellHealEvents = nil
+      GetNampowerVersion = probedVersion
+      assert(Nampower:Probe())
+      Nampower:ApplySetting()
+      assert(Nampower.active, "a current Nampower was not used again")
 
       -- Enabling must silence exactly the parser facts Nampower replaces, and
       -- leave the ones it has no event for alone.
@@ -39,6 +95,30 @@ def run(ctx: Context):
       assert(Parser:IsFactSuppressed("death"), "death was not suppressed")
       assert(not Parser:IsFactSuppressed("interrupt"),
         "interrupts have no Nampower event and must keep flowing from chat text")
+
+      -- Suppressed facts cost nothing on the chat side: a route whose
+      -- patterns are all suppressed returns before any pattern runs, and a
+      -- shared route keeps only its live patterns.
+      -- Every pattern carries the fact it records: an untagged one would stay
+      -- live under Nampower and count each hit a second time.
+      local routeName, route, entryIndex
+      for routeName, route in pairs(Parser.routes) do
+        if string.find(routeName, "^CHAT_MSG_") then for entryIndex = 1, table.getn(route) do
+          assert(route[entryIndex].fact, "an untagged pattern on " .. routeName .. ": " .. tostring(route[entryIndex].key))
+        end end
+      end
+      local missesBefore = Parser:GetMissCount()
+      assert(Parser:OnCombatMessage("CHAT_MSG_COMBAT_SELF_HITS", "You hit Boar for 12.") == nil,
+        "a fully suppressed route still matched its patterns")
+      local spellRoute = Parser.routes["CHAT_MSG_SPELL_SELF_DAMAGE"]
+      Parser:OnCombatMessage("CHAT_MSG_SPELL_SELF_DAMAGE", "Your Fireball hits Boar for 100.")
+      local liveIndex
+      for liveIndex = 1, table.getn(spellRoute.activeEntries) do
+        assert(spellRoute.activeEntries[liveIndex].fact == "interrupt",
+          "a suppressed pattern stayed live on a shared route")
+      end
+      assert(table.getn(spellRoute.activeEntries) > 0, "the interrupt patterns were dropped")
+      assert(Parser:GetMissCount() == missesBefore, "suppressed lines were counted as parser misses")
 
       -- Start a clean fight to assert against, on a known roster: earlier
       -- suites leave the party membership stubs in whatever state they need.
@@ -83,6 +163,15 @@ def run(ctx: Context):
       TestRegisterGUIDUnit("0xD", "Boar", "WARRIOR", false, 400, 800)
       local estimator = Skada.ThreatEstimate
       estimator:Reset()
+      -- Estimation only runs while a threat window is on screen: with none,
+      -- the hit is recorded but the estimator never sees it.
+      -- The threat ticker caches whether any window shows threat; none does.
+      Skada.Threat:Update(GetTime())
+      assert(estimator.wanted == false, "the threat ticker did not cache the window check")
+      fire("SPELL_DAMAGE_EVENT_OTHER", "0xD", "0xB", 133, 500, "0,0,0", 0, 2, "2,0,0,0")
+      assert(not estimator.threatByEnemyKey["0xD"] and estimator.enemyCount == 0,
+        "the threat estimator ran with no threat window shown")
+      estimator:SetWanted(true)
       fire("SPELL_DAMAGE_EVENT_OTHER", "0xD", "0xB", 133, 500, "0,0,0", 0, 2, "2,0,0,0")
       assert(estimator.threatByEnemyKey["0xD"] and estimator.threatByEnemyKey["0xD"].Bob,
         "Nampower damage on the untargeted twin did not key by its GUID")
@@ -92,7 +181,13 @@ def run(ctx: Context):
       fire("UNIT_DIED", "0xD")
       assert(not estimator.threatByEnemyKey["0xD"] and not estimator.enemyByKey["0xD"],
         "a Nampower death packet did not remove the fallen mob by GUID")
-      estimator:Reset()
+      -- Hiding the window drops what the estimator gathered, so a window
+      -- opened again mid-pull never mixes old totals with a gap.
+      fire("SPELL_DAMAGE_EVENT_OTHER", "0xD", "0xB", 133, 500, "0,0,0", 0, 2, "2,0,0,0")
+      assert(estimator.enemyCount > 0, "the estimator did not record with a window shown")
+      estimator:SetWanted(false)
+      assert(estimator.enemyCount == 0 and not next(estimator.threatByEnemyKey),
+        "hiding the threat window left stale estimator totals")
 
       -- Damage taken flows the other way: the enemy GUID is the source and the
       -- named group member is the victim.
